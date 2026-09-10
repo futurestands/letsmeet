@@ -13,21 +13,34 @@ import {
   Users,
   Video,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function MeetingRoom() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   const meetingCode = searchParams.get('code') ?? 'LETSMEET';
   const mode = searchParams.get('mode') ?? 'join';
 
   const participants = useMemo(
     () => [
-      { name: 'You', accent: 'from-blue-500 to-indigo-500', active: true },
-      { name: 'Maya', accent: 'from-emerald-500 to-teal-500', active: false },
-      { name: 'Noah', accent: 'from-violet-500 to-fuchsia-500', active: false },
-      { name: 'Jules', accent: 'from-orange-500 to-amber-500', active: false },
+      {
+        name: user?.full_name || 'You',
+        accent: 'from-blue-500 to-indigo-500',
+        active: true,
+        role: 'Host',
+        status: 'Ready',
+      },
     ],
-    [],
+    [user?.full_name],
+  );
+
+  const meetingNotes = useMemo(
+    () =>
+      mode === 'new'
+        ? ['Start the meeting and add your agenda items here.']
+        : ['Join the meeting and capture the key discussion points here.'],
+    [mode],
   );
 
   return (
@@ -66,7 +79,7 @@ export default function MeetingRoom() {
         <div className="mb-6 flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
           <div>
             <p className="text-sm text-slate-400">Meeting status</p>
-            <p className="text-xl font-semibold">Everyone is here</p>
+            <p className="text-xl font-semibold">{participants.length} people are in this meeting</p>
           </div>
           <button className="rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500">
             Invite
@@ -84,7 +97,7 @@ export default function MeetingRoom() {
                   <div className="flex h-56 flex-col justify-between rounded-2xl bg-slate-950/90 p-4">
                     <div className="flex items-center justify-between">
                       <span className="rounded-full bg-slate-900/80 px-2 py-1 text-xs text-slate-300">
-                        {participant.active ? 'Host' : 'Participant'}
+                        {participant.role}
                       </span>
                       <div className="flex gap-2">
                         <div className="rounded-full border border-slate-700 bg-slate-900 p-2">
@@ -102,7 +115,7 @@ export default function MeetingRoom() {
                       </div>
                       <div>
                         <p className="font-medium">{participant.name}</p>
-                        <p className="text-sm text-slate-400">Video on</p>
+                        <p className="text-sm text-slate-400">Video on · {participant.status}</p>
                       </div>
                     </div>
                   </div>
@@ -120,7 +133,7 @@ export default function MeetingRoom() {
                 {participants.map((participant) => (
                   <li key={participant.name} className="flex items-center justify-between rounded-xl bg-slate-800 px-3 py-2">
                     <span>{participant.name}</span>
-                    <span className="text-slate-400">{participant.active ? 'Speaking' : 'Listening'}</span>
+                    <span className="text-slate-400">{participant.status}</span>
                   </li>
                 ))}
               </ul>
@@ -131,9 +144,9 @@ export default function MeetingRoom() {
                 <Sparkles className="h-5 w-5 text-violet-400" /> Meeting notes
               </h2>
               <div className="space-y-3 text-sm text-slate-300">
-                <p>• Review the launch checklist before the client demo.</p>
-                <p>• Share the product roadmap with the stakeholders.</p>
-                <p>• Capture a summary of decisions made in the meeting.</p>
+                {meetingNotes.map((note) => (
+                  <p key={note}>• {note}</p>
+                ))}
               </div>
             </div>
           </aside>

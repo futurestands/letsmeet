@@ -36,8 +36,30 @@ export default function Home() {
             </div>
           </div>
           <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl p-4 shadow-2xl">
-            <div className="grid grid-cols-3 gap-2">{['bg-blue-600','bg-green-600','bg-purple-600','bg-orange-600','bg-pink-600','bg-teal-600'].map((c,i)=>(<div key={i} className="aspect-video rounded-lg bg-gray-700 flex items-center justify-center"><div className={'w-10 h-10 rounded-full '+c+' flex items-center justify-center text-white font-bold text-sm'}>{['JD','MK','AL','SR','PN','TC'][i]}</div></div>))}</div>
-            <div className="mt-3 flex justify-center gap-3">{[Mic,Camera,Monitor].map((Ic,i)=><div key={i} className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center"><Ic className="w-4 h-4 text-white"/></div>)}<div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center"><div className="w-4 h-0.5 bg-white"/></div></div>
+            <div className="grid grid-cols-1 gap-3">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <span className="text-sm font-medium text-slate-300">Meeting ready</span>
+                  <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300">Live</span>
+                </div>
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-[#1a73e8] to-[#6c63ff] font-semibold text-white">
+                    {user?.full_name?.slice(0, 2).toUpperCase() || 'ME'}
+                  </div>
+                  <div>
+                    <p className="font-medium text-white">{user?.full_name || 'Your workspace'}</p>
+                    <p className="text-sm text-slate-400">Ready to host a meeting</p>
+                  </div>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  {[Mic, Camera, Monitor].map((Icon, index) => (
+                    <div key={index} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-800 text-slate-200">
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>

@@ -4,9 +4,9 @@ import { ArrowLeft, CalendarDays, Clock3, Video } from 'lucide-react';
 
 export default function ScheduleMeeting() {
   const navigate = useNavigate();
-  const [date, setDate] = useState('2026-09-12');
-  const [time, setTime] = useState('09:00');
-  const [title, setTitle] = useState('Team sync');
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [title, setTitle] = useState('');
 
   return (
     <div className="min-h-screen bg-slate-50">
