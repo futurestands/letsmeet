@@ -2,13 +2,53 @@
 import { useNavigate } from 'react-router-dom';
 import { Video, Calendar, Users, Shield, Zap, MessageSquare, Monitor, Hand, Smile, Play, Mic, Camera, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+
+interface ScheduledMeeting {
+  title: string;
+  date: string;
+  time: string;
+  code: string;
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [meetingCode, setMeetingCode] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const start = () => navigate('/meet?mode=new');
-  const join = () => { if (meetingCode.trim()) navigate('/meet?code=' + meetingCode); };
+  const [scheduledMeetings] = useState<ScheduledMeeting[]>(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+
+    const storedMeetings = window.localStorage.getItem('letsmeet-scheduled-meetings');
+
+    if (!storedMeetings) {
+      return [];
+    }
+
+    try {
+      const parsedMeetings = JSON.parse(storedMeetings) as ScheduledMeeting[];
+      return Array.isArray(parsedMeetings) ? parsedMeetings : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const createMeetingCode = () => {
+    const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `LETSMEET-${randomPart}`;
+  };
+
+  const start = () => {
+    const nextCode = createMeetingCode();
+    navigate(`/meet?mode=new&code=${encodeURIComponent(nextCode)}`);
+  };
+
+  const join = () => {
+    if (meetingCode.trim()) {
+      navigate(`/meet?mode=join&code=${encodeURIComponent(meetingCode.trim())}`);
+    }
+  };
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50">
       <nav className="fixed top-0 left-0 right-0 z-50 glass-effect border-b border-gray-100">
@@ -63,6 +103,35 @@ export default function Home() {
           </div>
         </div>
       </section>
+      {scheduledMeetings.length > 0 && (
+        <section className="px-6 pt-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <h2 className="text-2xl font-bold text-gray-900">Upcoming meetings</h2>
+                <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">
+                  {scheduledMeetings.length} saved
+                </span>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {scheduledMeetings.map((meeting) => (
+                  <button
+                    key={`${meeting.code}-${meeting.date}-${meeting.time}`}
+                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meeting.code)}`)}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                  >
+                    <p className="text-sm font-medium text-slate-500">{meeting.date}</p>
+                    <h3 className="mt-2 text-lg font-semibold text-slate-900">{meeting.title}</h3>
+                    <p className="mt-1 text-sm text-slate-600">{meeting.time}</p>
+                    <p className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-blue-700">{meeting.code}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section id="features" className="py-20 px-6">
         <div className="max-w-7xl mx-auto text-center mb-16"><h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">Everything you need</h2></div>
         <div className="max-w-7xl mx-auto grid md:grid-cols-2 lg:grid-cols-3 gap-6">
