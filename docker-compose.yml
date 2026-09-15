@@ -1,0 +1,16 @@
+version: '3.9'
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: letsmeet-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880"
+      - "7881:7881/tcp"
+      - "7881:7881/udp"
+      - "7882:7882/tcp"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --config /etc/livekit.yaml

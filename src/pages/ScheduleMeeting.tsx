@@ -1,12 +1,57 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Clock3, Video } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, Clock3, Copy, Link2, Video } from 'lucide-react';
 
 export default function ScheduleMeeting() {
   const navigate = useNavigate();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [title, setTitle] = useState('');
+  const [meetingCode, setMeetingCode] = useState('');
+  const [shareLink, setShareLink] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const STORAGE_KEY = 'letsmeet-scheduled-meetings';
+  const canSave = title.trim().length > 0 && date && time;
+
+  const createMeetingCode = () => {
+    const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `LETSMEET-${randomPart}`;
+  };
+
+  const handleSave = () => {
+    if (!canSave) return;
+
+    const nextCode = meetingCode || createMeetingCode();
+    const generatedLink = `${window.location.origin}${window.location.pathname}#/meet?code=${encodeURIComponent(nextCode)}`;
+
+    const savedMeetings = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
+    const meetingEntry = {
+      title: title.trim(),
+      date,
+      time,
+      code: nextCode,
+      createdAt: new Date().toISOString(),
+    };
+
+    const filteredMeetings = savedMeetings.filter((entry: { code: string }) => entry.code !== nextCode);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([meetingEntry, ...filteredMeetings]));
+
+    setMeetingCode(nextCode);
+    setShareLink(generatedLink);
+    setCopied(false);
+  };
+
+  const handleCopyLink = async () => {
+    if (!shareLink) return;
+
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -80,20 +125,53 @@ export default function ScheduleMeeting() {
                 </div>
                 <div className="flex items-center gap-2">
                   <CalendarDays className="h-4 w-4 text-blue-600" />
-                  {date}
+                  {date || 'Choose a date'}
                 </div>
                 <div className="flex items-center gap-2">
                   <Clock3 className="h-4 w-4 text-blue-600" />
-                  {time}
+                  {time || 'Choose a time'}
                 </div>
               </div>
             </div>
+
+            {shareLink && (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="mb-2 text-sm font-medium text-emerald-700">Shareable meeting link</p>
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-white px-3 py-2">
+                  <Link2 className="h-4 w-4 text-emerald-600" />
+                  <input
+                    readOnly
+                    value={shareLink}
+                    className="flex-1 border-0 bg-transparent text-sm text-slate-700 outline-none"
+                  />
+                </div>
+                <div className="mt-4 flex flex-wrap justify-end gap-3">
+                  <button onClick={handleCopyLink} className="btn-secondary">
+                    {copied ? (
+                      <>
+                        <Check className="h-4 w-4" /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-4 w-4" /> Copy link
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meetingCode)}`)}
+                    className="btn-primary"
+                  >
+                    Open meeting
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end gap-3">
               <button onClick={() => navigate('/')} className="btn-secondary">
                 Cancel
               </button>
-              <button onClick={() => navigate('/')} className="btn-primary">
+              <button onClick={handleSave} disabled={!canSave} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
                 Save event
               </button>
             </div>
