@@ -101,9 +101,9 @@ export default function Home() {
       <section className="pt-32 pb-20 px-6">
         <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
           <div className="space-y-8">
-            <div className="inline-flex items-center gap-2 bg-[#e8f0fe] text-[#1a73e8] px-4 py-2 rounded-full text-sm font-medium"><Zap className="w-4 h-4"/>Up to 500 participants</div>
+            <div className="inline-flex items-center gap-2 bg-[#e8f0fe] text-[#1a73e8] px-4 py-2 rounded-full text-sm font-medium"><Zap className="w-4 h-4"/>Built for team-first collaboration</div>
             <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">Video meetings, <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#1a73e8] to-[#6c63ff]">reimagined</span></h1>
-            <p className="text-lg text-gray-600 max-w-lg">Premium video conferencing for teams of every size.</p>
+            <p className="text-lg text-gray-600 max-w-lg">Secure, tenant-aware conferencing for organizations and workspaces.</p>
             <div className="flex gap-4">
               <button onClick={start} className="btn-primary flex items-center gap-2 px-8 py-3.5"><Play className="w-5 h-5"/>Start a meeting</button>
               <button onClick={() => navigate('/schedule')} className="btn-secondary flex items-center gap-2 px-8 py-3.5"><Calendar className="w-5 h-5"/>Schedule</button>
@@ -179,7 +179,7 @@ export default function Home() {
       <section id="features" className="py-20 px-6">
         <div className="max-w-7xl mx-auto text-center mb-16"><h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">Everything you need</h2></div>
         <div className="max-w-7xl mx-auto grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[{icon:Users,t:'500 Participants',d:'Scale without limits'},{icon:Shield,t:'E2E Encryption',d:'AES-256 secured'},{icon:MessageSquare,t:'Real-time Chat',d:'With reactions'},{icon:Monitor,t:'HD Screen Share',d:'Full HD quality'},{icon:Hand,t:'Hand Raising',d:'Queue-based Q&A'},{icon:Smile,t:'AI Captions',d:'40+ languages'}].map((f,i)=>(
+          {[{icon:Users,t:'Workspace-first design',d:'Organized around teams and tenant boundaries'},{icon:Shield,t:'Security by default',d:'Protected access and meeting validation'},{icon:MessageSquare,t:'Real-time collaboration',d:'Live chat and meeting coordination'},{icon:Monitor,t:'Screen sharing',d:'Enterprise-ready meeting workflows'},{icon:Hand,t:'Moderation controls',d:'Planned host and attendee management'},{icon:Smile,t:'AI roadmap',d:'Conversation intelligence planned for later phases'}].map((f,i)=>(
             <div key={i} className="card p-6 hover:scale-[1.02] transition-transform"><h3 className="font-semibold text-gray-900 mb-2">{f.t}</h3><p className="text-sm text-gray-600">{f.d}</p></div>
           ))}
         </div>
@@ -187,9 +187,9 @@ export default function Home() {
       <section id="pricing" className="py-20 px-6 bg-gray-50">
         <div className="max-w-7xl mx-auto text-center mb-16"><h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">Simple pricing</h2></div>
         <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-8">
-          <div className="card p-8"><h3 className="text-xl font-semibold mb-2">Free</h3><div className="mb-6"><span className="text-4xl font-bold"></span><span className="text-gray-500">/mo</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>50 participants</li><li>60 min meetings</li><li>HD video</li></ul><button onClick={start} className="btn-secondary w-full">Get started</button></div>
-          <div className="card p-8 border-2 border-[#1a73e8] relative"><div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a73e8] text-white text-xs font-semibold px-3 py-1 rounded-full">Popular</div><h3 className="text-xl font-semibold mb-2">Pro</h3><div className="mb-6"><span className="text-4xl font-bold"></span><span className="text-gray-500">/user/mo</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>200 participants</li><li>Unlimited duration</li><li>AI captions</li></ul><button onClick={start} className="btn-primary w-full">Start trial</button></div>
-          <div className="card p-8"><h3 className="text-xl font-semibold mb-2">Enterprise</h3><div className="mb-6"><span className="text-4xl font-bold">Custom</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>500 participants</li><li>Unlimited</li><li>Custom integrations</li></ul><button className="btn-secondary w-full">Contact sales</button></div>
+          <div className="card p-8"><h3 className="text-xl font-semibold mb-2">Free</h3><div className="mb-6"><span className="text-4xl font-bold"></span><span className="text-gray-500">/mo</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>Core conferencing access</li><li>Single workspace</li><li>Standard security</li></ul><button onClick={start} className="btn-secondary w-full">Get started</button></div>
+          <div className="card p-8 border-2 border-[#1a73e8] relative"><div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#1a73e8] text-white text-xs font-semibold px-3 py-1 rounded-full">Popular</div><h3 className="text-xl font-semibold mb-2">Pro</h3><div className="mb-6"><span className="text-4xl font-bold"></span><span className="text-gray-500">/user/mo</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>Expanded collaboration</li><li>Advanced scheduling</li><li>AI-ready roadmap</li></ul><button onClick={start} className="btn-primary w-full">Start trial</button></div>
+          <div className="card p-8"><h3 className="text-xl font-semibold mb-2">Enterprise</h3><div className="mb-6"><span className="text-4xl font-bold">Custom</span></div><ul className="space-y-2 mb-8 text-sm text-gray-600"><li>Multi-workspace scale</li><li>Role-based controls</li><li>Custom deployment needs</li></ul><button className="btn-secondary w-full">Contact sales</button></div>
         </div>
       </section>
       <footer className="border-t border-gray-100 py-12 px-6 text-center"><p className="text-sm text-gray-400">© 2026 LeTsMeet. All rights reserved.</p></footer>
