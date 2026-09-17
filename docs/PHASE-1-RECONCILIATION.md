@@ -150,10 +150,65 @@ The database now enforces that participants may not self-assign privileged roles
 
 Meeting and scheduled meeting updates are restricted from changing `organization_id`, `workspace_id`, or `host_id` on a user-controlled path. This prevents cross-tenant row movement and protects the integrity of the tenant boundary after creation.
 
-### Tests performed
+### Previous application checks
 
-The project includes a security-focused set of tests in [src/lib/meeting-utils.test.ts](../src/lib/meeting-utils.test.ts) covering organization membership conditions, workspace authorization, meeting access boundaries, and token issuance rules. The repo was also validated with lint, tests, and a production build.
+The project includes client-side tests in [src/lib/meeting-utils.test.ts](../src/lib/meeting-utils.test.ts) covering organization membership conditions, workspace authorization, meeting access boundaries, and token issuance rules. Those tests do not execute PostgreSQL RLS, triggers, privileges, or migration SQL and are not database security evidence.
 
 ## Outcome
 
 The repository is now better aligned with the deployed production database state and the tenant security model required for the SaaS foundation. The app and migration history now reflect the real production architecture rather than the earlier prototype assumptions.
+
+## Final Database Security Audit
+
+Audit baseline: commit `c5df11b5d591606334414278b117cbaae88ea045` (`fix: harden SaaS tenant and role security`). Phase 2 was not started.
+
+### SQL correctness findings
+
+The audit found that [003_saas_security_hardening.sql](../supabase/migrations/003_saas_security_hardening.sql) is not valid PostgreSQL RLS design. `OLD` is referenced in `WITH CHECK` expressions for organizations, memberships, workspaces, meetings, scheduled meetings, participants, and invites. `OLD` and `NEW` exist for trigger functions only; they are not available in policy expressions. Applying 003 therefore fails when PostgreSQL parses those policies.
+
+The migration also failed to drop the policy named `Authenticated users can create organizations` created by 002. PostgreSQL combines permissive policies with OR semantics, so the intended `created_by = auth.uid()` restriction was not the only insert policy. This undermined the owner-creation sequence even apart from the invalid `OLD` references.
+
+Migration [004_correct_rls_security_model.sql](../supabase/migrations/004_correct_rls_security_model.sql) was added without rewriting 001, 002, or 003. It replaces the invalid comparison logic with immutable-field `BEFORE UPDATE` triggers, removes the leftover organization insert policy, hardens helper function execution, and recreates affected policies without `OLD`/`NEW`.
+
+Because 003 cannot complete, the literal fresh-database sequence 001 -> 002 -> 003 -> 004 is not currently reproducible. 004 is the corrective migration for a database where 003's valid prefix was applied or for a repaired migration run; a future release should establish a clean migration baseline rather than claim that the broken 003 chain is executable.
+
+### Verified and unverified controls
+
+The following classifications are based on static SQL and application review only. No PostgreSQL database attack test was executed.
+
+| Property | Classification | Finding |
+| --- | --- | --- |
+| A. Cannot self-add to arbitrary organization | NOT VERIFIED | 003's stale permissive organization insert policy remains; 004 corrects it. |
+| B. Cannot self-create owner/admin membership | NOT VERIFIED | The 003 policy is intended to deny it, but 003 is invalid and was not executed. |
+| C. Normal member cannot create another member | NOT VERIFIED | Correct in 003's replacement policy by inspection; not database-tested. |
+| D. Normal member cannot change own role | NOT VERIFIED | Update authorization and role check are present in 004; not database-tested. |
+| E. Normal member cannot change another member's role | NOT VERIFIED | Update authorization is present in 004; not database-tested. |
+| F. Participant cannot self-assign host/co-host/moderator | NOT VERIFIED | Insert and update role checks are present; not database-tested. |
+| G. Participant cannot move participant tenant fields | NOT VERIFIED | 004 trigger design enforces this; not database-tested. |
+| H. Host cannot move a meeting organization | NOT VERIFIED | 004 trigger design enforces this; not database-tested. |
+| I. Host cannot move a meeting workspace | NOT VERIFIED | 004 trigger design enforces this; not database-tested. |
+| J. Host cannot change meeting host_id | NOT VERIFIED | 004 trigger design enforces this; not database-tested. |
+| K. Scheduled meeting cannot cross tenants | NOT VERIFIED | 004 trigger design enforces this; not database-tested. |
+| L. Chat cannot attach to another tenant meeting | NOT VERIFIED | 003's tenant equality checks are present; 003 was not executable/tested. |
+| M. Invite cannot attach to another tenant meeting | NOT VERIFIED | 003/004 tenant equality checks are present; not database-tested. |
+| N. Organization B cannot read organization A data | NOT VERIFIED | Static policies are tenant-scoped and helpers are made definer-backed in 004; not database-tested. |
+
+No property is classified VERIFIED because the required database-level tests were not run. No property is classified FAILED after the 004 correction by static review, but the migration chain itself is FAILED for reproducibility until the 003 issue is addressed in the migration strategy.
+
+### SECURITY DEFINER and recursion findings
+
+`ensure_organization_owner_membership()` runs as a definer with `search_path = public` and is only invoked by the organization insert trigger. 004 revokes direct execution from `PUBLIC`. `ensure_user_profile_context()` also uses `search_path = public`, checks `p_user_id = auth.uid()`, and remains executable only by `authenticated` after 004; it cannot be called with another user's UUID through the guarded path.
+
+The authorization helpers read `organization_members`, which would recurse if they ran as invoker functions from membership policies. 004 changes the helpers to `SECURITY DEFINER`, fixes the search path, revokes `PUBLIC` execution, and grants only `authenticated` execution. Their definer owner and schema ownership must still be verified in the target Supabase database before deployment.
+
+### Application and LiveKit review
+
+No hard-coded tenant IDs, frontend service-role key, localStorage business-data fallback, or old `is_active` authorization fallback was found. The LiveKit endpoint authenticates the bearer token with Supabase, resolves the meeting by the requested code, derives identity from the authenticated user, and does not accept browser `identity`, `name`, or `role` as authority. Arbitrary room names are rejected. Participant access now requires a matching organization/workspace row with an active attendance state; host access is derived from the meeting's stored `host_id`. The endpoint currently grants the same publish/subscribe permissions to every authorized participant; it does not grant a browser-requested host role, but role-specific LiveKit permissions are not implemented.
+
+The frontend meeting creation helpers currently pass nullable tenant IDs. The database should reject those inserts under the hardened policies; application callers need to obtain the authenticated user's organization/workspace context before creating meetings. This is an application workflow gap, not evidence that client-side authorization can replace RLS.
+
+### Tests and readiness decision
+
+Actually executed during this audit: `npm run lint`, `npm run test` (8 tests passed), `npm run build`, and diagnostics for the reviewed application files; all passed. No PostgreSQL tests were executed. Database cases are designed, not executed, in [DATABASE_SECURITY_TEST_PLAN.md](DATABASE_SECURITY_TEST_PLAN.md). Docker was unavailable and `psql` was not installed; production was not contacted.
+
+Phase 1 is **not ready for Phase 2**. The SQL correction is prepared in 004, but the migration chain is not reproducible and the critical properties remain NOT VERIFIED until an isolated PostgreSQL/Supabase test run succeeds. Do not begin Phase 2.

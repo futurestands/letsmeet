@@ -88,7 +88,7 @@ app.get('/api/livekit/token', async (req, res) => {
     const isHost = meeting.host_id === user.id;
     const { data: memberRow, error: memberError } = await supabaseAdmin
       .from('meeting_participants')
-      .select('id, meeting_id, user_id')
+      .select('id, meeting_id, user_id, organization_id, workspace_id, role, status')
       .eq('meeting_id', meeting.id)
       .eq('user_id', user.id)
       .maybeSingle();
@@ -97,7 +97,14 @@ app.get('/api/livekit/token', async (req, res) => {
       return res.status(500).json({ error: 'Unable to validate meeting membership.' });
     }
 
-    if (!isHost && !memberRow) {
+    const hasActiveMembership = Boolean(
+      memberRow
+      && memberRow.organization_id === meeting.organization_id
+      && memberRow.workspace_id === meeting.workspace_id
+      && ['joined', 'waiting', 'muted'].includes(String(memberRow.status)),
+    );
+
+    if (!isHost && !hasActiveMembership) {
       return res.status(403).json({ error: 'You do not have access to this meeting.' });
     }
 
