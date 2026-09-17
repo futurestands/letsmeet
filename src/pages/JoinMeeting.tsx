@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Link2, Video } from 'lucide-react';
+import { normalizeMeetingCode } from '../lib/meeting-utils';
 
 export default function JoinMeeting() {
   const navigate = useNavigate();
   const [meetingCode, setMeetingCode] = useState('');
 
   const joinMeeting = () => {
-    if (meetingCode.trim()) {
-      navigate(`/meet?code=${encodeURIComponent(meetingCode.trim())}`);
+    const normalizedCode = normalizeMeetingCode(meetingCode);
+    if (normalizedCode !== 'LM-INVALID') {
+      navigate(`/meet?code=${encodeURIComponent(normalizedCode)}`);
     }
   };
 

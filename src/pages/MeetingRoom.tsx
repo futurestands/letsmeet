@@ -19,6 +19,8 @@ import {
   RoomEvent,
 } from 'livekit-client';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { normalizeMeetingCode } from '../lib/meeting-utils';
 
 interface ParticipantCard {
   id: string;
@@ -36,7 +38,7 @@ export default function MeetingRoom() {
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const roomRef = useRef<Room | null>(null);
-  const meetingCode = searchParams.get('code') ?? 'LETSMEET';
+  const meetingCode = normalizeMeetingCode(searchParams.get('code') ?? 'LM-INVALID');
   const mode = searchParams.get('mode') ?? 'join';
   const livekitUrl = import.meta.env.VITE_LIVEKIT_URL as string | undefined;
   const livekitTokenEndpoint = import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined;
@@ -111,11 +113,24 @@ export default function MeetingRoom() {
       setConnectionMessage('Connecting to the LiveKit room...');
 
       try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+
+        if (!accessToken) {
+          throw new Error('You must be signed in to join this meeting.');
+        }
+
         const identity = encodeURIComponent(user?.id || 'guest-user');
         const displayName = encodeURIComponent(user?.full_name || 'Guest User');
         const tokenUrl = `${livekitTokenEndpoint}${livekitTokenEndpoint.includes('?') ? '&' : '?'}room=${encodeURIComponent(meetingCode)}&identity=${identity}&name=${displayName}`;
 
-        const tokenResponse = await fetch(tokenUrl);
+        const tokenResponse = await fetch(tokenUrl, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+        });
         const tokenPayload = (await tokenResponse.json()) as { token?: string; error?: string };
 
         if (!tokenResponse.ok || !tokenPayload.token) {

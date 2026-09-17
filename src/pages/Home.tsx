@@ -1,13 +1,15 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Video, Calendar, Users, Shield, Zap, MessageSquare, Monitor, Hand, Smile, Play, Mic, Camera, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { createMeetingRecord, listScheduledMeetingsForUser } from '../lib/data-access';
+import { generateMeetingCode, normalizeMeetingCode } from '../lib/meeting-utils';
 
-interface ScheduledMeeting {
+interface ScheduledMeetingSummary {
   title: string;
   date: string;
   time: string;
-  code: string;
+  meeting_code?: string | null;
 }
 
 export default function Home() {
@@ -15,38 +17,70 @@ export default function Home() {
   const { user, signOut } = useAuth();
   const [meetingCode, setMeetingCode] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [scheduledMeetings] = useState<ScheduledMeeting[]>(() => {
-    if (typeof window === 'undefined') {
-      return [];
-    }
+  const [scheduledMeetings, setScheduledMeetings] = useState<ScheduledMeetingSummary[]>([]);
+  const [loadingMeetings, setLoadingMeetings] = useState(true);
 
-    const storedMeetings = window.localStorage.getItem('letsmeet-scheduled-meetings');
+  useEffect(() => {
+    let active = true;
 
-    if (!storedMeetings) {
-      return [];
-    }
+    const loadMeetings = async () => {
+      if (!user?.id) {
+        if (active) {
+          setScheduledMeetings([]);
+          setLoadingMeetings(false);
+        }
+        return;
+      }
 
-    try {
-      const parsedMeetings = JSON.parse(storedMeetings) as ScheduledMeeting[];
-      return Array.isArray(parsedMeetings) ? parsedMeetings : [];
-    } catch {
-      return [];
-    }
-  });
+      try {
+        const rows = await listScheduledMeetingsForUser(user.id);
+        if (!active) return;
 
-  const createMeetingCode = () => {
-    const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `LETSMEET-${randomPart}`;
-  };
+        setScheduledMeetings(
+          rows.map((row) => ({
+            title: row.title,
+            date: row.date,
+            time: row.time,
+            meeting_code: row.meeting_code ?? undefined,
+          })),
+        );
+      } catch (error) {
+        console.error('Failed to load scheduled meetings', error);
+        if (active) {
+          setScheduledMeetings([]);
+        }
+      } finally {
+        if (active) {
+          setLoadingMeetings(false);
+        }
+      }
+    };
 
-  const start = () => {
-    const nextCode = createMeetingCode();
+    void loadMeetings();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const start = async () => {
+    if (!user?.id) return;
+
+    const nextCode = normalizeMeetingCode(generateMeetingCode());
+    await createMeetingRecord({
+      title: 'New meeting',
+      hostId: user.id,
+      code: nextCode,
+      status: 'live',
+    });
+
     navigate(`/meet?mode=new&code=${encodeURIComponent(nextCode)}`);
   };
 
   const join = () => {
-    if (meetingCode.trim()) {
-      navigate(`/meet?mode=join&code=${encodeURIComponent(meetingCode.trim())}`);
+    const normalizedCode = normalizeMeetingCode(meetingCode);
+    if (normalizedCode !== 'LM-INVALID') {
+      navigate(`/meet?mode=join&code=${encodeURIComponent(normalizedCode)}`);
     }
   };
   return (
@@ -103,7 +137,7 @@ export default function Home() {
           </div>
         </div>
       </section>
-      {scheduledMeetings.length > 0 && (
+      {!loadingMeetings && scheduledMeetings.length > 0 && (
         <section className="px-6 pt-8">
           <div className="max-w-7xl mx-auto">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -116,17 +150,27 @@ export default function Home() {
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {scheduledMeetings.map((meeting) => (
                   <button
-                    key={`${meeting.code}-${meeting.date}-${meeting.time}`}
-                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meeting.code)}`)}
+                    key={`${meeting.meeting_code ?? meeting.title}-${meeting.date}-${meeting.time}`}
+                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meeting.meeting_code ?? meeting.title)}`)}
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
                   >
                     <p className="text-sm font-medium text-slate-500">{meeting.date}</p>
                     <h3 className="mt-2 text-lg font-semibold text-slate-900">{meeting.title}</h3>
                     <p className="mt-1 text-sm text-slate-600">{meeting.time}</p>
-                    <p className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-blue-700">{meeting.code}</p>
+                    <p className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-blue-700">{meeting.meeting_code ?? 'No code'}</p>
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!loadingMeetings && scheduledMeetings.length === 0 && (
+        <section className="px-6 pt-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+              No scheduled meetings yet. Create a plan to keep the next session organized.
             </div>
           </div>
         </section>

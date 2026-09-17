@@ -30,40 +30,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadUserProfile = async (authUser: AuthUser) => {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authUser.id)
-      .maybeSingle();
+    const fallbackUser: User = {
+      id: authUser.id,
+      email: authUser.email ?? '',
+      full_name: authUser.user_metadata?.full_name ?? authUser.email?.split('@')[0] ?? 'User',
+      created_at: new Date().toISOString(),
+    };
 
-    if (data) {
-      setUser(data);
-    } else {
-      setUser({
-        id: authUser.id,
-        email: authUser.email ?? '',
-        full_name: authUser.user_metadata?.full_name ?? authUser.email?.split('@')[0] ?? 'User',
-        created_at: new Date().toISOString(),
-      });
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      if (error && !['PGRST116', '42P01'].includes(error.code ?? '')) {
+        console.error('Failed to load user profile', error);
+      }
+
+      if (data) {
+        setUser(data as User);
+        return;
+      }
+
+      const { error: insertError } = await supabase
+        .from('users')
+        .upsert(
+          {
+            id: authUser.id,
+            email: authUser.email ?? '',
+            full_name: fallbackUser.full_name,
+            created_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' },
+        );
+
+      if (insertError && insertError.code !== '42P01') {
+        console.error('Failed to provision user profile', insertError);
+      }
+
+      setUser(fallbackUser);
+    } catch (error) {
+      console.error('User provisioning failed', error);
+      setUser(fallbackUser);
+    } finally {
+      setLoading(false);
     }
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Failed to load user profile', error);
-    }
-
-    setLoading(false);
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    const bootstrapSession = async () => {
+      const { data } = await supabase.auth.getSession();
       const session = data?.session;
-      if (session?.user) void loadUserProfile(session.user);
-      else setLoading(false);
-    });
+
+      if (session?.user) {
+        await loadUserProfile(session.user);
+      } else {
+        setUser(null);
+        setLoading(false);
+      }
+    };
+
+    void bootstrapSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) void loadUserProfile(session.user);
-      else {
+      if (session?.user) {
+        void loadUserProfile(session.user);
+      } else {
         setUser(null);
         setLoading(false);
       }

@@ -1,45 +1,51 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarDays, Check, Clock3, Copy, Link2, Video } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { createScheduledMeeting } from '../lib/data-access';
+import { generateMeetingCode, normalizeMeetingCode } from '../lib/meeting-utils';
 
 export default function ScheduleMeeting() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [title, setTitle] = useState('');
   const [meetingCode, setMeetingCode] = useState('');
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const STORAGE_KEY = 'letsmeet-scheduled-meetings';
   const canSave = title.trim().length > 0 && date && time;
 
-  const createMeetingCode = () => {
-    const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `LETSMEET-${randomPart}`;
-  };
+  const handleSave = async () => {
+    if (!canSave || !user?.id) return;
 
-  const handleSave = () => {
-    if (!canSave) return;
+    try {
+      setSaving(true);
+      setSaveError(null);
 
-    const nextCode = meetingCode || createMeetingCode();
-    const generatedLink = `${window.location.origin}${window.location.pathname}#/meet?code=${encodeURIComponent(nextCode)}`;
+      const nextCode = normalizeMeetingCode(meetingCode || generateMeetingCode());
+      const meetingEntry = await createScheduledMeeting({
+        title: title.trim(),
+        date,
+        time,
+        hostId: user.id,
+        code: nextCode,
+      });
 
-    const savedMeetings = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
-    const meetingEntry = {
-      title: title.trim(),
-      date,
-      time,
-      code: nextCode,
-      createdAt: new Date().toISOString(),
-    };
+      const generatedLink = `${window.location.origin}${window.location.pathname}#/meet?code=${encodeURIComponent(meetingEntry?.meeting_code ?? nextCode)}`;
 
-    const filteredMeetings = savedMeetings.filter((entry: { code: string }) => entry.code !== nextCode);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([meetingEntry, ...filteredMeetings]));
-
-    setMeetingCode(nextCode);
-    setShareLink(generatedLink);
-    setCopied(false);
+      setMeetingCode(nextCode);
+      setShareLink(generatedLink);
+      setCopied(false);
+    } catch (error) {
+      console.error('Failed to save scheduled meeting', error);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save this meeting.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCopyLink = async () => {
@@ -134,6 +140,12 @@ export default function ScheduleMeeting() {
               </div>
             </div>
 
+            {saveError && (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {saveError}
+              </div>
+            )}
+
             {shareLink && (
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="mb-2 text-sm font-medium text-emerald-700">Shareable meeting link</p>
@@ -158,7 +170,7 @@ export default function ScheduleMeeting() {
                     )}
                   </button>
                   <button
-                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meetingCode)}`)}
+                    onClick={() => navigate(`/meet?code=${encodeURIComponent(normalizeMeetingCode(meetingCode))}`)}
                     className="btn-primary"
                   >
                     Open meeting
@@ -171,8 +183,8 @@ export default function ScheduleMeeting() {
               <button onClick={() => navigate('/')} className="btn-secondary">
                 Cancel
               </button>
-              <button onClick={handleSave} disabled={!canSave} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
-                Save event
+              <button onClick={handleSave} disabled={!canSave || saving} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+                {saving ? 'Saving...' : 'Save event'}
               </button>
             </div>
           </div>
