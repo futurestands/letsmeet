@@ -356,6 +356,7 @@ DROP POLICY IF EXISTS "Anyone can view scheduled meetings" ON public.scheduled_m
 DROP POLICY IF EXISTS "Authenticated users can create scheduled meetings" ON public.scheduled_meetings;
 DROP POLICY IF EXISTS "Host can update scheduled meetings" ON public.scheduled_meetings;
 DROP POLICY IF EXISTS "Host can delete scheduled meetings" ON public.scheduled_meetings;
+DROP POLICY IF EXISTS "Hosts can delete scheduled meetings" ON public.scheduled_meetings;
 DROP POLICY IF EXISTS "Scheduled meetings are viewable to org members" ON public.scheduled_meetings;
 DROP POLICY IF EXISTS "Authenticated users can create scheduled meetings in their org" ON public.scheduled_meetings;
 DROP POLICY IF EXISTS "Hosts can update scheduled meetings" ON public.scheduled_meetings;

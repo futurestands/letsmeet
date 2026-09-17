@@ -1,8 +1,10 @@
 # Database Security Test Plan
 
-Status: DESIGNED - NOT EXECUTED.
+Status: EXECUTED in an isolated disposable PostgreSQL 18.3 database.
 
-These tests must run only against an isolated local PostgreSQL/Supabase database created from the migration chain. Do not run them against production. The local Docker database was unavailable during this audit, and `psql` was not installed, so no database attack test is claimed as passed.
+Result: 44 database security assertions passed, 0 failed. The LiveKit endpoint checks were executed separately against local mock services: unauthenticated access returned HTTP 401 and a mocked Org B user requesting an Org A meeting returned HTTP 403. No production credentials or endpoints were used.
+
+These tests must run only against an isolated local PostgreSQL/Supabase database created from the migration chain. Do not run them against production. This audit used a disposable PostgreSQL 18.3 Windows cluster on localhost port 55432 because Docker was unavailable.
 
 ## Preconditions
 
@@ -178,7 +180,7 @@ Expected: authorization helpers are `SECURITY DEFINER`, have `search_path = publ
 
 ## LiveKit access cases
 
-These cases exercise the token endpoint with bearer tokens obtained for isolated test users. They are designed, not executed here.
+These cases exercise the token endpoint with bearer tokens obtained for isolated test users. They were executed against local mock services during this audit.
 
 ```text
 User B requests room code for Meeting A: HTTP 403.
@@ -188,4 +190,4 @@ User A has a participant row whose organization_id or workspace_id differs from 
 User A requests role=host, identity=User B, or an arbitrary tenant parameter: the request cannot change the issued identity, room, or authorization; host access is derived only from stored meeting.host_id.
 ```
 
-These endpoint cases are DESIGNED - NOT EXECUTED in this audit.
+These endpoint cases were EXECUTED against local mock services in this audit.

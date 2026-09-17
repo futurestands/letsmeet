@@ -166,36 +166,36 @@ Audit baseline: commit `c5df11b5d591606334414278b117cbaae88ea045` (`fix: harden 
 
 The final chain is `001_create_tables.sql -> 002_saas_foundation.sql -> 003_saas_security_hardening.sql`. Migration 003 now contains the complete correction: it uses no `OLD` or `NEW` references in RLS policies, replaces all tenant-sensitive policies inherited from 002, adds immutable-field triggers, and hardens the authorization helpers. Redundant migration 004 was removed because it had never successfully deployed and must not be required to repair a failed 003.
 
-Static SQL review classifies 003 as **VERIFIED** for PostgreSQL construct validity and dependency ordering. This is not runtime database evidence: no isolated PostgreSQL database was available, so clean-chain execution remains **NOT VERIFIED** until actually executed.
+Static SQL review and isolated runtime execution classify 003 as **VERIFIED** for PostgreSQL construct validity and dependency ordering. The clean chain executed successfully on a disposable PostgreSQL 18.3 database. The first execution exposed a duplicate scheduled-meeting DELETE policy inherited from 002; 003 was corrected to drop that policy before recreating it, then the clean chain passed.
 
 ### Verified and unverified controls
 
-The following classifications distinguish static review from database behavior. No PostgreSQL database attack test was executed.
+The following classifications distinguish actual isolated database execution from static review.
 
 | Property | Classification | Finding |
 | --- | --- | --- |
-| A. Cannot self-add to arbitrary organization | NOT VERIFIED | 003 drops the permissive 002 insert policy and requires `created_by = auth.uid()`; not database-tested. |
-| B. Cannot self-create owner/admin membership | NOT VERIFIED | 003 permits only owner/admin-authorized creation of member/guest rows; owner creation is trigger-only; not database-tested. |
-| C. Normal member cannot create another member | NOT VERIFIED | Membership insert requires owner/admin authorization; not database-tested. |
-| D. Normal member cannot change own role | NOT VERIFIED | Membership update requires owner/admin authorization and privileged role changes are trigger-blocked; not database-tested. |
-| E. Normal member cannot change another member's role | NOT VERIFIED | Update authorization is present in 003; not database-tested. |
-| F. Participant cannot self-assign host/co-host/moderator | NOT VERIFIED | Insert and update role checks are present in 003; not database-tested. |
-| G. Participant cannot move participant tenant fields | NOT VERIFIED | 003 trigger design enforces this; not database-tested. |
-| H. Host cannot move a meeting organization | NOT VERIFIED | 003 trigger design enforces this; not database-tested. |
-| I. Host cannot move a meeting workspace | NOT VERIFIED | 003 trigger design enforces this; not database-tested. |
-| J. Host cannot change meeting host_id | NOT VERIFIED | 003 trigger design enforces this; not database-tested. |
-| K. Scheduled meeting cannot cross tenants | NOT VERIFIED | 003 trigger design enforces this; not database-tested. |
-| L. Chat cannot attach to another tenant meeting | NOT VERIFIED | 003 requires meeting organization/workspace equality; not database-tested. |
-| M. Invite cannot attach to another tenant meeting | NOT VERIFIED | 003 requires meeting organization/workspace equality; not database-tested. |
-| N. Organization B cannot read organization A data | NOT VERIFIED | Static policies are tenant-scoped and helpers are definer-backed; not database-tested. |
+| A. Cannot self-add to arbitrary organization | VERIFIED | Executed as an Org A member; arbitrary membership insert was denied. |
+| B. Cannot self-create owner/admin membership | VERIFIED | Owner and admin membership inserts were denied. |
+| C. Normal member cannot create another member | VERIFIED | Unauthorized membership creation was denied. |
+| D. Normal member cannot change own role | VERIFIED | Self-promotion affected zero rows. |
+| E. Normal member cannot change another member's role | VERIFIED | Unauthorized role change affected zero rows. |
+| F. Participant cannot self-assign host/co-host/moderator | VERIFIED | Host, co-host, and moderator updates were denied. |
+| G. Participant cannot move participant tenant fields | VERIFIED | Organization, workspace, meeting, and identity reassignment were denied. |
+| H. Host cannot move a meeting organization | VERIFIED | Organization reassignment raised an error. |
+| I. Host cannot move a meeting workspace | VERIFIED | Workspace reassignment raised an error. |
+| J. Host cannot change meeting host_id | VERIFIED | Host reassignment raised an error. |
+| K. Scheduled meeting cannot cross tenants | VERIFIED | Organization, workspace, and host reassignment raised errors. |
+| L. Chat cannot attach to another tenant meeting | VERIFIED | Cross-tenant chat insert was denied. |
+| M. Invite cannot attach to another tenant meeting | VERIFIED | Cross-tenant invite insert and reassignment were denied. |
+| N. Organization B cannot read organization A data | VERIFIED | Cross-tenant SELECT returned zero rows. |
 
-No database security property is classified VERIFIED because the required database-level tests were not run. No property is statically classified FAILED in the corrected 003 design. Runtime behavior remains NOT VERIFIED.
+All listed database security properties are classified VERIFIED based on actual execution against the disposable PostgreSQL database. No listed database property failed.
 
 ### SECURITY DEFINER and recursion findings
 
 `ensure_organization_owner_membership()` runs as a definer with `search_path = public` and is only invoked by the organization insert trigger. 003 revokes direct execution from `PUBLIC`. `ensure_user_profile_context()` uses `search_path = public`, checks `p_user_id = auth.uid()`, and is executable only by `authenticated`; it cannot be called with another user's UUID through the guarded path.
 
-The authorization helpers read `organization_members`, which would recurse if they ran as invoker functions from membership policies. 003 makes the helpers `SECURITY DEFINER`, fixes the search path, revokes `PUBLIC` execution, and grants only `authenticated` execution. Their definer owner and schema ownership must still be verified in the target Supabase database before deployment.
+The authorization helpers read `organization_members`, which would recurse if they ran as invoker functions from membership policies. 003 makes the helpers `SECURITY DEFINER`, fixes the search path, revokes `PUBLIC` execution, and grants only `authenticated` execution. RLS recursion tests passed without authorization errors or unintended access. Their definer owner and schema ownership should still be verified in the target Supabase database before deployment.
 
 ### Application and LiveKit review
 
@@ -205,6 +205,8 @@ The frontend meeting creation helpers currently pass nullable tenant IDs. The da
 
 ### Tests and readiness decision
 
-Actually executed during this audit: `npm run lint`, `npm run test` (8 tests passed), `npm run build`, and diagnostics for the reviewed application files; all passed. No PostgreSQL tests were executed. Database cases are designed, not executed, in [DATABASE_SECURITY_TEST_PLAN.md](DATABASE_SECURITY_TEST_PLAN.md). Docker was unavailable and `psql` was not installed; production was not contacted.
+Actually executed during this audit: `npm run lint`, `npm run test` (8 tests passed), `npm run build`, and `git diff --check`; all passed. The migration chain 001 -> 002 -> 003 executed successfully in a disposable PostgreSQL 18.3 cluster on Windows. Database security testing executed 44 assertions: 44 passed and 0 failed. This included cross-tenant SELECT/INSERT/UPDATE/DELETE, role escalation, owner creation, immutable triggers, SECURITY DEFINER privileges, and RLS recursion. A local LiveKit endpoint test with a mocked Org B user requesting Org A returned HTTP 403; an unauthenticated request returned HTTP 401. Production was not contacted or modified. Full test cases are recorded in [DATABASE_SECURITY_TEST_PLAN.md](DATABASE_SECURITY_TEST_PLAN.md).
 
-Phase 1 is **not ready for Phase 2**. The final 003 is statically valid and the chain is structurally deployable, but critical database properties remain NOT VERIFIED until an isolated PostgreSQL/Supabase test run succeeds. Do not begin Phase 2.
+Database runtime verification: **VERIFIED**.
+
+Phase 1 is **ready for Phase 2 from the database-security verification perspective**. Phase 2 was not started. Remaining risks are production-role/definer-owner verification, the frontend's nullable tenant-context workflow, and the fact that LiveKit host/admin/co-host permission differences are intentionally future scope.
