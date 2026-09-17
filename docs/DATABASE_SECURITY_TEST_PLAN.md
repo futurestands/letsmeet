@@ -1,6 +1,6 @@
 # Database Security Test Plan
 
-Status: designed, not executed in this audit.
+Status: DESIGNED - NOT EXECUTED.
 
 These tests must run only against an isolated local PostgreSQL/Supabase database created from the migration chain. Do not run them against production. The local Docker database was unavailable during this audit, and `psql` was not installed, so no database attack test is claimed as passed.
 
@@ -11,7 +11,7 @@ Create two authenticated users, two organizations, and two workspaces:
 - `:user_a`, `:user_b`
 - `:org_a`, `:org_b`
 - `:workspace_a`, `:workspace_b`
-- `:meeting_a`, `:scheduled_a`, `:participant_a`, `:invite_a`
+- `:meeting_a`, `:meeting_b`, `:scheduled_a`, `:participant_a`, `:invite_a`
 
 Seed memberships so `user_a` is an owner/member in Org A and `user_b` is an owner/member in Org B. Seed Meeting A, Scheduled Meeting A, Participant A, Chat Message A, and Invite A in Org A. Apply migrations in a clean database before running the cases.
 
@@ -128,7 +128,22 @@ ROLLBACK TO SAVEPOINT attack_m;
 SELECT COUNT(*) = 0 AS no_org_a_visibility
 FROM public.meetings
 WHERE organization_id = ':org_a';
+
+-- Cross-tenant DELETE: denied because no tenant-authorized delete policy exists
+SAVEPOINT attack_delete_meeting;
+DELETE FROM public.meetings WHERE id = ':meeting_a';
+ROLLBACK TO SAVEPOINT attack_delete_meeting;
+
+SAVEPOINT attack_delete_participant;
+DELETE FROM public.meeting_participants WHERE id = ':participant_a';
+ROLLBACK TO SAVEPOINT attack_delete_participant;
+
+SAVEPOINT attack_delete_invite;
+DELETE FROM public.meeting_invites WHERE id = ':invite_a';
+ROLLBACK TO SAVEPOINT attack_delete_invite;
 ```
+
+Run the same cross-tenant delete cases as `user_b` against Org A rows. Every delete must be denied. The scheduled-meeting delete policy is intentionally limited to the meeting host and must also be tested with a non-host.
 
 ## Owner creation sequence
 
@@ -160,3 +175,17 @@ ORDER BY routine_name, grantee;
 ```
 
 Expected: authorization helpers are `SECURITY DEFINER`, have `search_path = public`, and are executable by `authenticated` but not `PUBLIC`. The owner-membership trigger function is not executable by `PUBLIC`; the profile-context function is executable by `authenticated` and rejects a UUID different from `auth.uid()`.
+
+## LiveKit access cases
+
+These cases exercise the token endpoint with bearer tokens obtained for isolated test users. They are designed, not executed here.
+
+```text
+User B requests room code for Meeting A: HTTP 403.
+User A requests an unknown or malformed room code: HTTP 400 or 404.
+User A has a participant row for Meeting A with status left or removed: HTTP 403.
+User A has a participant row whose organization_id or workspace_id differs from Meeting A: HTTP 403.
+User A requests role=host, identity=User B, or an arbitrary tenant parameter: the request cannot change the issued identity, room, or authorization; host access is derived only from stored meeting.host_id.
+```
+
+These endpoint cases are DESIGNED - NOT EXECUTED in this audit.
