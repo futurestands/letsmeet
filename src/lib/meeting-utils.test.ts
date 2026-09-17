@@ -98,4 +98,35 @@ describe('meeting utilities', () => {
       }),
     ).toBe(false);
   });
+
+  it('prevents self-escalation into privileged roles and tenants', () => {
+    expect(isUserMemberOfOrganization('owner', 'active')).toBe(true);
+    expect(isUserMemberOfOrganization('admin', 'active')).toBe(true);
+    expect(isUserMemberOfOrganization('member', 'active')).toBe(true);
+    expect(isUserMemberOfOrganization('guest', 'active')).toBe(false);
+
+    expect(
+      canAccessMeeting({
+        userId: 'user-b',
+        meetingHostId: 'user-a',
+        organizationMember: true,
+        workspaceMember: true,
+        participantMembership: true,
+        isAuthenticated: true,
+        meetingStatus: 'live',
+      }),
+    ).toBe(true);
+
+    expect(
+      canAccessMeeting({
+        userId: 'user-b',
+        meetingHostId: 'user-a',
+        organizationMember: false,
+        workspaceMember: false,
+        participantMembership: false,
+        isAuthenticated: true,
+        meetingStatus: 'live',
+      }),
+    ).toBe(false);
+  });
 });

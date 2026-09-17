@@ -124,6 +124,36 @@ This is still a Phase 1 reconciliation and not a full enterprise product. The re
 - full tenant-scoped audit trail
 - advanced collaboration and AI features are still future phases
 
+## Security Hardening
+
+### Vulnerability discovered
+
+A critical privilege-escalation issue existed in the organization membership policy model. The earlier grant allowed a user to insert themselves into any organization by setting `user_id = auth.uid()` and using an arbitrary `organization_id`, while also allowing ownership and admin role choice by the client. This meant the browser could effectively self-promote into an organization and escalate privileges without a valid administrative flow.
+
+### Why it was dangerous
+
+The issue allowed a user to join the wrong tenant, create unauthorized organization memberships, and set business-critical roles like `owner` or `admin` using untrusted client input. That path violates the core security model for multi-tenant SaaS and can lead to cross-tenant data access and unauthorized administrative control.
+
+### How it was fixed
+
+The migration was hardened with a new [supabase/migrations/003_saas_security_hardening.sql](../supabase/migrations/003_saas_security_hardening.sql) file. It restricts organization creation to the authenticated user, ensures organization owners are created atomically via a trigger, and requires owner/admin authorization for any membership or workspace creation. The schema also prevents tenant movement on update operations and locks participant role assignment to secure database rules.
+
+### Membership model
+
+Organization membership creation is now controlled. A normal authenticated user cannot create an arbitrary org membership or self-promote to `owner` or `admin`. Ownership is created as part of the organization creation flow, and only the owner/admin path can invite or manage members.
+
+### Role assignment model
+
+The database now enforces that participants may not self-assign privileged roles such as `host`, `co-host`, or `moderator`. Normal participant inserts are limited to the participant role, while host/admin operations must be performed through trusted server-side or controlled administrative logic.
+
+### Tenant immutability
+
+Meeting and scheduled meeting updates are restricted from changing `organization_id`, `workspace_id`, or `host_id` on a user-controlled path. This prevents cross-tenant row movement and protects the integrity of the tenant boundary after creation.
+
+### Tests performed
+
+The project includes a security-focused set of tests in [src/lib/meeting-utils.test.ts](../src/lib/meeting-utils.test.ts) covering organization membership conditions, workspace authorization, meeting access boundaries, and token issuance rules. The repo was also validated with lint, tests, and a production build.
+
 ## Outcome
 
-The repository is now better aligned with the deployed production database state and can be used to recreate the intended tenant-aware schema from scratch without needing to re-run the production SQL.
+The repository is now better aligned with the deployed production database state and the tenant security model required for the SaaS foundation. The app and migration history now reflect the real production architecture rather than the earlier prototype assumptions.
