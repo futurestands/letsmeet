@@ -11,6 +11,7 @@ const requiredMigrations = [
   '003_saas_security_hardening.sql',
   '004_persistent_meeting_system.sql',
   '005_realtime_conferencing.sql',
+  '006_supabase_pgcrypto_compatibility.sql',
 ];
 const publicVariables = [
   'VITE_SUPABASE_URL',

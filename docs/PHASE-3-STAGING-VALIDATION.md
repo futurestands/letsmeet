@@ -7,7 +7,7 @@ repository to the production Supabase or LiveKit projects while following it.
 
 - Browser: static Vite application served over HTTPS.
 - API: `server/livekit-token.mjs` served over HTTPS.
-- Database/auth: a dedicated Supabase staging project with migrations 001 through 005.
+- Database/auth: a dedicated Supabase staging project with migrations 001 through 006.
 - Media: a dedicated LiveKit staging deployment reachable over WSS and WebRTC.
 - TURN: LiveKit Cloud TURN or a TLS-enabled TURN service attached to the staging LiveKit server.
 
@@ -76,6 +76,7 @@ The dry run must show only:
 003_saas_security_hardening.sql
 004_persistent_meeting_system.sql
 005_realtime_conferencing.sql
+006_supabase_pgcrypto_compatibility.sql
 ```
 
 Apply and inspect:

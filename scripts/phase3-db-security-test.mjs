@@ -60,6 +60,7 @@ try {
     path.join(root, 'supabase', 'migrations', '003_saas_security_hardening.sql'),
     path.join(root, 'supabase', 'migrations', '004_persistent_meeting_system.sql'),
     path.join(root, 'supabase', 'migrations', '005_realtime_conferencing.sql'),
+    path.join(root, 'supabase', 'migrations', '006_supabase_pgcrypto_compatibility.sql'),
     path.join(__dirname, 'phase3-db-security-test.sql'),
   ].forEach(run);
 

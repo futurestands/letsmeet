@@ -8,7 +8,7 @@ For the complete non-production deployment, TURN, test-account, and two-browser 
 
 ## What to do next
 
-1. Apply database migrations through `005_realtime_conferencing.sql`.
+1. Apply database migrations through `006_supabase_pgcrypto_compatibility.sql`.
 2. Update an ignored environment file with the public browser values and server-only secrets shown in `.env.example`.
 3. Set `LIVEKIT_HOST` to the HTTP(S) LiveKit API origin used by the server SDK. Do not expose
    `LIVEKIT_API_SECRET` or `SUPABASE_SERVICE_ROLE_KEY` through a `VITE_` variable.
