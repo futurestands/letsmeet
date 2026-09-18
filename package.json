@@ -9,11 +9,15 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:phase3-db": "node scripts/phase3-db-security-test.mjs",
+    "test:phase3-livekit": "node scripts/phase3-livekit-endpoint-test.mjs",
     "db:migrate": "node scripts/migrate.js",
     "db:migrate:dry": "node scripts/migrate.js --dry",
     "server:livekit-token": "node server/livekit-token.mjs"
   },
   "dependencies": {
+    "@livekit/components-react": "^2.9.24",
+    "@livekit/components-styles": "^1.2.0",
     "@supabase/supabase-js": "^2.116.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

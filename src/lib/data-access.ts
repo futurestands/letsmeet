@@ -15,6 +15,8 @@ export type MeetingSummary = {
   ended_at?: string | null;
   organization_id: string;
   workspace_id: string;
+  is_locked?: boolean;
+  locked_at?: string | null;
 };
 
 export type ScheduledMeetingSummary = {
@@ -60,7 +62,16 @@ export type JoinedMeeting = MeetingSummary & {
   participant_status: ParticipantStatus;
 };
 
-const meetingSelect = 'id, code, title, host_id, status, created_at, scheduled_for, started_at, ended_at, organization_id, workspace_id';
+export type ChatMessage = {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  user_name: string;
+  message: string;
+  created_at: string;
+};
+
+const meetingSelect = 'id, code, title, host_id, status, created_at, scheduled_for, started_at, ended_at, organization_id, workspace_id, is_locked, locked_at';
 const scheduledMeetingSelect = 'id, title, date, time, timezone, host_id, meeting_code, created_at, scheduled_for, status, organization_id, workspace_id';
 const participantSelect = 'id, meeting_id, user_id, user_name, role, status, joined_at, left_at';
 
@@ -174,6 +185,35 @@ export async function listParticipantsForMeeting(meetingId: string): Promise<Par
     .order('joined_at', { ascending: true });
   if (error) throw error;
   return (data ?? []) as ParticipantSummary[];
+}
+
+export async function listChatMessages(meetingId: string): Promise<ChatMessage[]> {
+  const { data, error } = await supabase
+    .from('chat_messages')
+    .select('id, meeting_id, user_id, user_name, message, created_at')
+    .eq('meeting_id', meetingId)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return ((data ?? []) as ChatMessage[]).reverse();
+}
+
+export async function sendPersistentChat(meetingId: string, message: string): Promise<ChatMessage> {
+  const { data, error } = await supabase.rpc('send_persistent_chat', {
+    p_meeting_id: meetingId,
+    p_message: message,
+  });
+  if (error) throw error;
+  return data as ChatMessage;
+}
+
+export async function setPersistentMeetingLock(meetingId: string, locked: boolean): Promise<MeetingSummary> {
+  const { data, error } = await supabase.rpc('set_persistent_meeting_lock', {
+    p_meeting_id: meetingId,
+    p_locked: locked,
+  });
+  if (error) throw error;
+  return data as MeetingSummary;
 }
 
 export async function createPersistentMeeting(title = 'New meeting', workspaceId?: string | null): Promise<MeetingSummary> {

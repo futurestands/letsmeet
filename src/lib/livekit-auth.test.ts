@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateLiveKitAccess, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
 
 const meeting = {
   id: 'meeting-a',
@@ -155,5 +155,68 @@ describe('LiveKit authorization', () => {
       organizationMember: true,
       workspaceMember: true,
     })).toMatchObject({ ok: false, status: 403 });
+  });
+});
+
+describe('LiveKit host moderation authorization', () => {
+  it('allows the stored host to mute or remove a tenant-matched participant', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: memberParticipant,
+      action: 'mute',
+    })).toMatchObject({ ok: true, status: 200 });
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: memberParticipant,
+      action: 'remove',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('rejects non-host moderation and host targeting', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-b',
+      meeting,
+      targetParticipant: hostParticipant,
+      action: 'remove',
+    })).toMatchObject({ ok: false, status: 403 });
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: hostParticipant,
+      action: 'mute',
+    })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('rejects cross-tenant targets and unsupported actions', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: { ...memberParticipant, organization_id: 'org-b' },
+      action: 'remove',
+    })).toMatchObject({ ok: false, status: 403 });
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: memberParticipant,
+      action: 'promote',
+    })).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it('rejects moderation of departed participants', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      targetParticipant: { ...memberParticipant, status: 'removed' },
+      action: 'remove',
+    })).toMatchObject({ ok: false, status: 409 });
   });
 });

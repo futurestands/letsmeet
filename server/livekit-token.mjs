@@ -1,8 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
-import { evaluateLiveKitAccess, normalizeRoomCode } from './livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 
 dotenv.config();
 
@@ -12,6 +12,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,ht
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const livekitHost = process.env.LIVEKIT_HOST
+  ?? process.env.VITE_LIVEKIT_URL?.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
 const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -29,7 +31,7 @@ app.use((req, res, next) => {
   }
 
   res.header('Access-Control-Allow-Origin', allowOrigin);
-  res.header('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
 
@@ -140,6 +142,84 @@ app.get('/api/livekit/token', async (req, res) => {
   } catch (error) {
     console.error('Failed to issue LiveKit token', error);
     return res.status(500).json({ error: 'Unable to issue a LiveKit token.' });
+  }
+});
+
+app.post('/api/livekit/moderate', async (req, res) => {
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  const room = normalizeRoomCode(req.body?.room);
+  const targetIdentity = String(req.body?.targetIdentity ?? '');
+  const action = String(req.body?.action ?? '');
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+
+  if (!apiKey || !apiSecret || !livekitHost) {
+    return res.status(503).json({ error: 'LiveKit moderation is not configured.' });
+  }
+  if (!authToken || !supabaseAdmin) {
+    return res.status(401).json({ error: 'Authentication is required.' });
+  }
+  if (!isAllowedRoomCode(room) || !/^[0-9a-f-]{36}$/i.test(targetIdentity)) {
+    return res.status(400).json({ error: 'Meeting or participant identifier is invalid.' });
+  }
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Session is invalid or expired.' });
+    }
+
+    const { data: meeting, error: meetingError } = await supabaseAdmin
+      .from('meetings')
+      .select('id, code, host_id, status, organization_id, workspace_id')
+      .eq('code', room)
+      .maybeSingle();
+    if (meetingError) return res.status(500).json({ error: 'Unable to resolve the meeting.' });
+
+    const { data: targetParticipant, error: participantError } = meeting
+      ? await supabaseAdmin
+          .from('meeting_participants')
+          .select('id, user_id, role, status, organization_id, workspace_id, left_at')
+          .eq('meeting_id', meeting.id)
+          .eq('user_id', targetIdentity)
+          .maybeSingle()
+      : { data: null, error: null };
+    if (participantError) return res.status(500).json({ error: 'Unable to resolve the participant.' });
+
+    const decision = evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: user.id,
+      meeting,
+      targetParticipant,
+      action,
+    });
+    if (!decision.ok) return res.status(decision.status).json({ error: decision.error });
+
+    const { error: updateError } = await supabaseAdmin
+      .from('meeting_participants')
+      .update({
+        status: action === 'remove' ? 'removed' : 'muted',
+        left_at: action === 'remove' ? new Date().toISOString() : targetParticipant.left_at,
+      })
+      .eq('id', targetParticipant.id);
+    if (updateError) return res.status(500).json({ error: 'Participant state could not be persisted.' });
+
+    const roomService = new RoomServiceClient(livekitHost, apiKey, apiSecret);
+    if (action === 'mute') {
+      const participantInfo = await roomService.getParticipant(room, targetIdentity);
+      const microphoneTracks = participantInfo.tracks.filter((track) => track.source === TrackSource.MICROPHONE);
+      await Promise.all(microphoneTracks.map((track) => roomService.mutePublishedTrack(room, targetIdentity, track.sid, true)));
+    } else {
+      await roomService.removeParticipant(room, targetIdentity, {
+        revokeTokenTs: BigInt(Math.floor(Date.now() / 1000)),
+      });
+    }
+
+    return res.json({ ok: true, action, targetIdentity });
+  } catch (error) {
+    console.error('Failed to moderate LiveKit participant', error);
+    return res.status(502).json({ error: 'The participant could not be moderated.' });
   }
 });
 

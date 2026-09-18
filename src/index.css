@@ -29,6 +29,71 @@ body {
   min-height: 100vh;
 }
 
+.meeting-control {
+  display: inline-flex;
+  height: 3rem;
+  width: 3rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(51 65 85);
+  border-radius: 9999px;
+  background: rgb(30 41 59);
+  color: white;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.meeting-control:hover {
+  border-color: rgb(100 116 139);
+  background: rgb(51 65 85);
+}
+
+.meeting-control:focus-visible {
+  outline: 2px solid rgb(96 165 250);
+  outline-offset: 2px;
+}
+
+.meeting-control svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.meeting-control-off,
+.meeting-control-leave {
+  border-color: rgb(220 38 38);
+  background: rgb(220 38 38);
+}
+
+.meeting-control-active {
+  border-color: rgb(96 165 250);
+  background: rgb(37 99 235);
+}
+
+.lk-participant-tile {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: inherit;
+  background: rgb(15 23 42);
+}
+
+.lk-participant-tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lk-participant-tile[data-lk-local-participant="true"] video {
+  transform: scaleX(-1);
+}
+
+@media (max-width: 767px) {
+  .meeting-control {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
 .glass-effect {
   background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(14px);

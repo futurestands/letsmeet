@@ -1,186 +1,142 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Camera, Hand, MessageSquare, Mic, Monitor, PhoneOff, Play, Video } from 'lucide-react';
-import { createLocalTracks, Room, RoomEvent } from 'livekit-client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Lock, Play, Video } from 'lucide-react';
+import ConferenceRoom from '../components/ConferenceRoom';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 import {
   findMeetingByCode,
   joinPersistentMeeting,
   leavePersistentMeeting,
-  listParticipantsForMeeting,
   transitionPersistentMeeting,
   type JoinedMeeting,
-  type ParticipantSummary,
+  type MeetingSummary,
 } from '../lib/data-access';
-import { isJoinableMeetingStatus, isValidMeetingCode, normalizeMeetingCode } from '../lib/meeting-utils';
+import type { PreJoinSettings } from '../lib/conference-utils';
+import { isValidMeetingCode, meetingJoinPath, normalizeMeetingCode } from '../lib/meeting-utils';
+import { supabase } from '../lib/supabase';
 
-const cardAccents = ['from-blue-500 to-indigo-500', 'from-emerald-500 to-teal-500', 'from-amber-500 to-orange-500', 'from-rose-500 to-pink-500'];
-type ConnectionState = 'idle' | 'unavailable' | 'connecting' | 'connected' | 'error';
+type MeetingLocationState = {
+  preJoinSettings?: PreJoinSettings;
+};
+
+const defaultSettings: PreJoinSettings = {
+  audioEnabled: false,
+  videoEnabled: false,
+  audioDeviceId: '',
+  videoDeviceId: '',
+  audioOutputDeviceId: '',
+};
 
 export default function MeetingRoom() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { meetingCode: routeCode } = useParams();
   const { user } = useAuth();
-  const roomRef = useRef<Room | null>(null);
   const leaveInFlight = useRef(false);
+  const settings = (location.state as MeetingLocationState | null)?.preJoinSettings;
   const [meeting, setMeeting] = useState<JoinedMeeting | null>(null);
-  const [participants, setParticipants] = useState<ParticipantSummary[]>([]);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
-  const [connectionMessage, setConnectionMessage] = useState('Waiting for the host to start the meeting.');
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const livekitUrl = import.meta.env.VITE_LIVEKIT_URL as string | undefined;
   const livekitTokenEndpoint = import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined;
+  const code = normalizeMeetingCode(routeCode ?? '');
   const isHost = Boolean(meeting && user && meeting.host_id === user.id);
-  const livekitReady = Boolean(livekitUrl && livekitTokenEndpoint);
-  const meetingId = meeting?.id ?? null;
-  const meetingCode = meeting?.code ?? null;
-  const meetingStatus = meeting?.status ?? null;
+  const persistentMeetingId = meeting?.id ?? null;
+  const persistentMeetingCode = meeting?.code ?? null;
+  const persistentMeetingStatus = meeting?.status ?? null;
 
   useEffect(() => {
-    let active = true;
-    const loadMeeting = async () => {
-      if (!user?.id) return;
-      const code = normalizeMeetingCode(routeCode ?? '');
-      if (!isValidMeetingCode(code)) {
-        setPageError('This meeting link is invalid.');
-        return;
-      }
+    if (!settings && isValidMeetingCode(code)) {
+      navigate(meetingJoinPath(code), { replace: true });
+    }
+  }, [code, navigate, settings]);
 
+  useEffect(() => {
+    if (!settings || !user?.id || !isValidMeetingCode(code)) return undefined;
+    let active = true;
+
+    void Promise.all([joinPersistentMeeting(code), findMeetingByCode(code)])
+      .then(([resolved, persisted]) => {
+        if (active) setMeeting({ ...resolved, ...persisted });
+      })
+      .catch((error) => {
+        if (active) setPageError(error instanceof Error ? error.message : 'Unable to load this meeting.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [code, settings, user?.id]);
+
+  useEffect(() => {
+    if (!persistentMeetingId || !user?.id) return undefined;
+
+    const channel = supabase
+      .channel(`meeting-state:${persistentMeetingId}:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'meetings', filter: `id=eq.${persistentMeetingId}` },
+        (payload) => {
+          const next = payload.new as MeetingSummary;
+          setMeeting((current) => current ? { ...current, ...next } : current);
+          if (next.status === 'ended' || next.status === 'cancelled') setToken(null);
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'meeting_participants', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          const participant = payload.new as { meeting_id?: string; status?: string };
+          if (participant.meeting_id === persistentMeetingId && participant.status === 'removed') {
+            setToken(null);
+            setPageError('The host removed you from this meeting.');
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [persistentMeetingId, user?.id]);
+
+  useEffect(() => {
+    if (!persistentMeetingCode || persistentMeetingStatus !== 'live' || !livekitTokenEndpoint) return undefined;
+    let active = true;
+
+    const authorize = async () => {
       try {
         setPageError(null);
-        const resolved = await joinPersistentMeeting(code);
-        if (!active) return;
-        setMeeting(resolved);
-        const rows = await listParticipantsForMeeting(resolved.id);
-        if (active) setParticipants(rows.filter((row) => ['joined', 'muted', 'waiting'].includes(row.status)));
-      } catch (error) {
-        if (active) setPageError(error instanceof Error ? error.message : 'Unable to load this meeting.');
-      }
-    };
-
-    void loadMeeting();
-    return () => {
-      active = false;
-    };
-  }, [routeCode, user?.id]);
-
-  useEffect(() => {
-    if (!meetingId || !meetingCode || !meetingStatus || !isJoinableMeetingStatus(meetingStatus)) return undefined;
-
-    let active = true;
-    const refresh = async () => {
-      try {
-        const latest = await findMeetingByCode(meetingCode);
-        if (!latest || !active) return;
-        const rows = await listParticipantsForMeeting(latest.id);
-        if (!active) return;
-        setMeeting((current) => current ? { ...current, ...latest } : current);
-        setParticipants(rows.filter((row) => ['joined', 'muted', 'waiting'].includes(row.status)));
-      } catch {
-        // Keep the current room state if a background refresh fails.
-      }
-    };
-
-    const timer = window.setInterval(() => {
-      void refresh();
-    }, 4000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [meetingId, meetingCode, meetingStatus]);
-
-  useEffect(() => {
-    if (!meetingCode || meetingStatus !== 'live' || !user || !livekitReady) return undefined;
-
-    let cancelled = false;
-    let room: Room | null = null;
-    const connectToLivekit = async () => {
-      setConnectionState('connecting');
-      setConnectionMessage('Connecting to the meeting room...');
-      setConnectionError(null);
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData.session?.access_token;
-        if (!accessToken) throw new Error('Your session has expired. Sign in again to join.');
-
-        const tokenResponse = await fetch(`${livekitTokenEndpoint}?room=${encodeURIComponent(meetingCode)}`, {
+        const { data } = await supabase.auth.getSession();
+        const accessToken = data.session?.access_token;
+        if (!accessToken) throw new Error('Your session expired. Sign in again.');
+        const response = await fetch(`${livekitTokenEndpoint}?room=${encodeURIComponent(persistentMeetingCode)}`, {
           headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
         });
-        const tokenPayload = (await tokenResponse.json()) as { token?: string; error?: string };
-        if (!tokenResponse.ok || !tokenPayload.token) throw new Error(tokenPayload.error || 'Unable to authorize the meeting room.');
-
-        room = new Room({ adaptiveStream: true, dynacast: true, reconnectPolicy: { nextRetryDelayInMs: () => 1000 } });
-        roomRef.current = room;
-        room.on(RoomEvent.Connected, () => {
-          if (cancelled) return;
-          setConnectionState('connected');
-          setConnectionMessage('Connected to the meeting room.');
-        });
-        room.on(RoomEvent.Disconnected, () => {
-          if (!cancelled) {
-            setConnectionState('error');
-            setConnectionMessage('The media connection was interrupted.');
-          }
-        });
-        await room.connect(livekitUrl as string, tokenPayload.token);
-        const localTracks = await createLocalTracks({ audio: true, video: false });
-        await Promise.all(localTracks.map((track) => room!.localParticipant.publishTrack(track)));
+        const payload = await response.json() as { token?: string; error?: string };
+        if (!response.ok || !payload.token) throw new Error(payload.error || 'Meeting authorization failed.');
+        if (active) setToken(payload.token);
       } catch (error) {
-        if (!cancelled) {
-          setConnectionState('error');
-          setConnectionMessage('LiveKit connection failed.');
-          setConnectionError(error instanceof Error ? error.message : 'Unable to connect to the meeting.');
-        }
+        if (active) setPageError(error instanceof Error ? error.message : 'Unable to connect to this meeting.');
       }
     };
 
-    const timer = window.setTimeout(() => {
-      void connectToLivekit();
-    }, 0);
+    void authorize();
     return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      if (room) void room.disconnect();
-      roomRef.current = null;
+      active = false;
     };
-  }, [livekitReady, livekitTokenEndpoint, livekitUrl, meetingCode, meetingStatus, user]);
-
-  const disconnectMedia = async () => {
-    if (roomRef.current) {
-      await roomRef.current.disconnect();
-      roomRef.current = null;
-    }
-  };
-
-  const leave = async () => {
-    if (!meeting || leaveInFlight.current) return;
-    leaveInFlight.current = true;
-    setBusy(true);
-    try {
-      await leavePersistentMeeting(meeting.id);
-      await disconnectMedia();
-      navigate('/');
-    } catch (error) {
-      leaveInFlight.current = false;
-      setActionError(error instanceof Error ? error.message : 'Unable to leave the meeting.');
-    } finally {
-      setBusy(false);
-    }
-  };
+  }, [livekitTokenEndpoint, persistentMeetingCode, persistentMeetingStatus]);
 
   const startMeeting = async () => {
     if (!meeting || busy) return;
     setBusy(true);
     setActionError(null);
     try {
-      const liveMeeting = await transitionPersistentMeeting(meeting.id, 'live');
-      setMeeting({ ...meeting, ...liveMeeting });
+      const next = await transitionPersistentMeeting(meeting.id, 'live');
+      setMeeting({ ...meeting, ...next });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to start the meeting.');
     } finally {
@@ -188,36 +144,51 @@ export default function MeetingRoom() {
     }
   };
 
-  const endMeeting = async () => {
+  const leaveMeeting = useCallback(async () => {
     if (!meeting || leaveInFlight.current) return;
     leaveInFlight.current = true;
-    setBusy(true);
+    try {
+      await leavePersistentMeeting(meeting.id);
+      navigate('/');
+    } catch {
+      leaveInFlight.current = false;
+      setActionError('Unable to leave the meeting. Try again.');
+    }
+  }, [meeting, navigate]);
+
+  const endMeeting = useCallback(async () => {
+    if (!meeting || leaveInFlight.current) return;
+    leaveInFlight.current = true;
     try {
       await transitionPersistentMeeting(meeting.id, 'ended');
-      await disconnectMedia();
       navigate(`/meetings/${meeting.id}`);
-    } catch (error) {
+    } catch {
       leaveInFlight.current = false;
-      setActionError(error instanceof Error ? error.message : 'Unable to end the meeting.');
-    } finally {
-      setBusy(false);
+      setActionError('Unable to end the meeting. Try again.');
     }
-  };
+  }, [meeting, navigate]);
+
+  if (!settings) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Opening device check…</div>;
+  }
 
   if (pageError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="max-w-md rounded-3xl border border-red-900 bg-slate-900 p-8 text-center">
           <h1 className="text-2xl font-semibold">Meeting unavailable</h1>
-          <p className="mt-3 text-sm text-slate-300">{pageError}</p>
-          <button onClick={() => navigate('/meetings')} className="btn-primary mt-6">View meetings</button>
+          <p className="mt-3 text-sm text-slate-300" role="alert">{pageError}</p>
+          <div className="mt-6 flex justify-center gap-3">
+            <button onClick={() => navigate(meetingJoinPath(code), { replace: true })} className="btn-primary">Try again</button>
+            <button onClick={() => navigate('/meetings')} className="btn-secondary">Meetings</button>
+          </div>
         </div>
       </div>
     );
   }
 
   if (!meeting) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">Loading meeting...</div>;
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Checking meeting access…</div>;
   }
 
   if (meeting.status === 'ended' || meeting.status === 'cancelled') {
@@ -225,125 +196,74 @@ export default function MeetingRoom() {
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center">
           <h1 className="text-2xl font-semibold">This meeting has {meeting.status}</h1>
-          <p className="mt-3 text-sm text-slate-300">The room is closed. You can review the meeting from history.</p>
+          <p className="mt-3 text-sm text-slate-300">The live room is closed. Its details remain available in meeting history.</p>
           <button onClick={() => navigate(`/meetings/${meeting.id}`)} className="btn-primary mt-6">View details</button>
         </div>
       </div>
     );
   }
 
-  const waitingForHost = meeting.status !== 'live';
-  const mediaState = waitingForHost
-    ? 'idle'
-    : livekitReady
-      ? connectionState
-      : 'unavailable';
-  const mediaMessage = waitingForHost
-    ? 'The host has not started the meeting yet.'
-    : livekitReady
-      ? connectionMessage
-      : 'Meeting access is ready. LiveKit is not configured in this environment.';
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white">
-      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/90 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/')} className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-700 bg-slate-900" aria-label="Back home">
+  if (meeting.status !== 'live') {
+    return (
+      <div className="min-h-screen bg-slate-950 text-white">
+        <header className="border-b border-slate-800 px-6 py-4">
+          <div className="mx-auto flex max-w-5xl items-center gap-4">
+            <button onClick={() => navigate('/meetings')} className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-700 bg-slate-900" aria-label="Back to meetings">
               <ArrowLeft className="h-4 w-4" />
             </button>
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{isHost ? 'Host view' : 'Participant view'}</p>
-              <h1 className="text-lg font-semibold">{meeting.title}</h1>
-              <p className="text-xs text-slate-500">{meeting.code}</p>
-            </div>
+            <div><h1 className="font-semibold">{meeting.title}</h1><p className="text-xs text-slate-400">{meeting.code}</p></div>
           </div>
-          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs uppercase tracking-[0.12em] text-slate-300">{meeting.status}</span>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-          <div>
-            <p className="text-sm text-slate-400">{waitingForHost ? 'Waiting room' : 'Live meeting'}</p>
-            <p className="text-xl font-semibold">{participants.length} participant{participants.length === 1 ? '' : 's'}</p>
+        </header>
+        <main className="mx-auto flex max-w-xl flex-col items-center px-6 py-24 text-center">
+          <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-600/20 text-blue-300">
+            <Video className="h-9 w-9" />
           </div>
-          <div className="flex items-center gap-3 text-sm">
-            <span className={`h-2 w-2 rounded-full ${mediaState === 'connected' ? 'bg-emerald-400' : mediaState === 'connecting' ? 'bg-amber-400' : 'bg-slate-500'}`} />
-            {mediaMessage}
-          </div>
-        </div>
-
-        {(connectionError || actionError) && (
-          <div className="mb-4 rounded-2xl border border-red-900 bg-red-950/40 p-4 text-sm text-red-200" role="alert">
-            {actionError || connectionError}
-          </div>
-        )}
-
-        {waitingForHost && (
-          <div className="mb-6 rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center">
-            <h2 className="text-2xl font-semibold">Ready when you are</h2>
-            <p className="mt-2 text-sm text-slate-400">
-              {isHost ? 'Start the meeting when your participants are ready. Leaving will not end it.' : 'You are in the waiting room. The host will start the meeting shortly.'}
-            </p>
+          <h2 className="mt-6 text-3xl font-bold">{isHost ? 'Ready to start?' : 'Waiting for the host'}</h2>
+          <p className="mt-3 text-slate-400">
+            {isHost ? 'Your camera and microphone choices are ready. Start when everyone is prepared.' : 'You will connect automatically when the host starts the meeting.'}
+          </p>
+          {meeting.is_locked && <p className="mt-4 flex items-center gap-2 text-sm text-amber-300"><Lock className="h-4 w-4" /> This meeting is locked</p>}
+          {actionError && <p className="mt-4 text-sm text-red-300" role="alert">{actionError}</p>}
+          <div className="mt-8 flex gap-3">
             {isHost && (
-              <button onClick={() => void startMeeting()} disabled={busy || meeting.status !== 'waiting'} className="btn-primary mt-6 disabled:cursor-not-allowed disabled:opacity-50">
-                <Play className="mr-2 h-4 w-4" />
-                {busy ? 'Starting...' : 'Start meeting'}
+              <button onClick={() => void startMeeting()} disabled={busy} className="btn-primary">
+                <Play className="mr-2 h-4 w-4" /> {busy ? 'Starting…' : 'Start meeting'}
               </button>
             )}
+            <button onClick={() => void leaveMeeting()} className="btn-secondary">Leave</button>
           </div>
-        )}
+        </main>
+      </div>
+    );
+  }
 
-        <section className="rounded-3xl border border-slate-800 bg-slate-900 p-4 shadow-2xl">
-          {participants.length === 0 ? (
-            <div className="flex min-h-64 items-center justify-center text-slate-400">Waiting for participants...</div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {participants.map((participant, index) => (
-                <div key={participant.id} className={`rounded-2xl bg-gradient-to-br ${cardAccents[index % cardAccents.length]} p-px`}>
-                  <div className="flex min-h-56 flex-col justify-between rounded-2xl bg-slate-950/95 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="rounded-full bg-slate-900 px-2 py-1 text-xs text-slate-300">{participant.role}</span>
-                      <span className="text-xs text-slate-400">{participant.status}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-semibold text-slate-950">
-                        {participant.user_name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-medium">{participant.user_name}</p>
-                        <p className="text-sm text-slate-400">{participant.user_id === user?.id ? 'You' : 'In this meeting'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+  if (!livekitUrl || !livekitTokenEndpoint) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+        <div className="max-w-md rounded-3xl border border-amber-900 bg-slate-900 p-8 text-center">
+          <h1 className="text-2xl font-semibold">Media service unavailable</h1>
+          <p className="mt-3 text-sm text-slate-300">LiveKit is not configured for this environment. The persistent meeting remains available.</p>
+          <button onClick={() => navigate('/meetings')} className="btn-primary mt-6">Back to meetings</button>
+        </div>
+      </div>
+    );
+  }
 
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          {[{ icon: Mic, label: 'Mic' }, { icon: Camera, label: 'Camera' }, { icon: Monitor, label: 'Share' }, { icon: MessageSquare, label: 'Chat' }, { icon: Hand, label: 'Raise hand' }].map(({ icon: Icon, label }) => (
-            <button key={label} className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-slate-200" aria-label={label} disabled>
-              <Icon className="h-5 w-5" />
-            </button>
-          ))}
-          <button onClick={() => void leave()} disabled={busy} className="ml-2 flex h-14 items-center justify-center rounded-full bg-slate-800 px-5 text-sm font-semibold text-white disabled:opacity-50">
-            Leave
-          </button>
-          {isHost && (
-            <button onClick={() => void endMeeting()} disabled={busy} className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white disabled:opacity-50" aria-label="End meeting">
-              <PhoneOff className="h-5 w-5" />
-            </button>
-          )}
-        </div>
-        <div className="mt-6 text-center text-sm text-slate-400">
-          <span className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2">
-            <Video className="h-4 w-4 text-blue-400" /> {meeting.code}
-          </span>
-        </div>
-      </main>
-    </div>
+  if (!token) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">Authorizing secure media…</div>;
+  }
+
+  return (
+    <ConferenceRoom
+      meeting={meeting}
+      user={user!}
+      token={token}
+      serverUrl={livekitUrl}
+      tokenEndpoint={livekitTokenEndpoint}
+      settings={settings ?? defaultSettings}
+      onMeetingChange={(next) => setMeeting((current) => current ? { ...current, ...next } : current)}
+      onLeave={() => void leaveMeeting()}
+      onEnd={() => void endMeeting()}
+    />
   );
 }

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Video, Calendar, Users, Shield, Zap, MessageSquare, Monitor, Hand, Smile, Play, Mic, Camera, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { createPersistentMeeting, getUserOrganizationContext, listMeetingsForUser, listScheduledMeetingsForUser, type UserOrganizationContext } from '../lib/data-access';
-import { destinationForMeeting, meetingJoinPath, meetingRoomPath, normalizeMeetingCode } from '../lib/meeting-utils';
+import { destinationForMeeting, meetingJoinPath, normalizeMeetingCode } from '../lib/meeting-utils';
 
 interface ScheduledMeetingSummary {
   title: string;
@@ -82,7 +82,7 @@ export default function Home() {
       setStarting(true);
       setActionError(null);
       const meeting = await createPersistentMeeting('New meeting', workspaceId);
-      navigate(meetingRoomPath(meeting.code));
+      navigate(meetingJoinPath(meeting.code));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Unable to start the meeting.');
     } finally {

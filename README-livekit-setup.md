@@ -1,21 +1,19 @@
 # Self-hosted LiveKit setup for LeTsMeet
 
-This project now includes the pieces needed to connect the app to a self-hosted LiveKit service.
-
-## Files added
-- `docker-compose.yml`
-- `livekit.yaml`
-- `server/livekit-token.mjs`
-- `.env.example` updated with LiveKit values
+This project includes a real browser conferencing client, a server-authorized token endpoint,
+and a host-only moderation endpoint for a self-hosted LiveKit service.
 
 ## What to do next
 
-1. Update `.env.local` with your real values.
-2. Start the token endpoint:
+1. Apply database migrations through `005_realtime_conferencing.sql`.
+2. Update `.env.local` with the public browser values and server-only secrets shown in `.env.example`.
+3. Set `LIVEKIT_HOST` to the HTTP(S) LiveKit API origin used by the server SDK. Do not expose
+   `LIVEKIT_API_SECRET` or `SUPABASE_SERVICE_ROLE_KEY` through a `VITE_` variable.
+4. Start the token endpoint:
    npm run server:livekit-token
-3. Start the LiveKit container:
+5. Start the LiveKit container:
    docker compose up -d
-4. Open the app and start a meeting.
+6. Open the app and start a meeting.
 
 ## Local development defaults
 
@@ -36,3 +34,10 @@ For a real deployment, use:
 ## Notes
 
 The frontend already points to the token endpoint at `http://localhost:3001/api/livekit/token` by default in `.env.example`.
+Host moderation uses `http://localhost:3001/api/livekit/moderate` and independently verifies the
+authenticated user, stored host identity, meeting tenant, target participant, and action.
+
+The client uses adaptive streaming, dynacast, simulcast, visibility-managed subscriptions, and a
+16-tile paginated grid. These are scaling foundations, not a claim of 500-participant production
+readiness. Redis, TURN validation, distributed LiveKit, observability, and load testing remain
+deployment work.

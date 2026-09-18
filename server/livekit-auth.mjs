@@ -79,3 +79,42 @@ export function evaluateLiveKitAccess({
     isHost: meeting.host_id === userId,
   };
 }
+
+export function evaluateModerationAccess({
+  isAuthenticated,
+  actorId,
+  meeting,
+  targetParticipant,
+  action,
+}) {
+  if (!isAuthenticated || !actorId) {
+    return { ok: false, status: 401, error: 'Authentication is required.' };
+  }
+  if (!meeting) {
+    return { ok: false, status: 404, error: 'Meeting not found.' };
+  }
+  if (meeting.host_id !== actorId) {
+    return { ok: false, status: 403, error: 'Only the meeting host can moderate participants.' };
+  }
+  if (!['waiting', 'live'].includes(String(meeting.status))) {
+    return { ok: false, status: 409, error: 'This meeting is not active.' };
+  }
+  if (!targetParticipant) {
+    return { ok: false, status: 404, error: 'Participant not found.' };
+  }
+  if (
+    targetParticipant.user_id === meeting.host_id
+    || targetParticipant.role === 'host'
+    || targetParticipant.organization_id !== meeting.organization_id
+    || targetParticipant.workspace_id !== meeting.workspace_id
+  ) {
+    return { ok: false, status: 403, error: 'Participant cannot be moderated.' };
+  }
+  if (!['joined', 'waiting', 'muted'].includes(String(targetParticipant.status))) {
+    return { ok: false, status: 409, error: 'Participant is no longer active.' };
+  }
+  if (!['mute', 'remove'].includes(String(action))) {
+    return { ok: false, status: 400, error: 'Unsupported moderation action.' };
+  }
+  return { ok: true, status: 200 };
+}
