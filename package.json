@@ -18,6 +18,8 @@
     "test:staging-livekit-dual": "node --env-file=.env.staging.local scripts/staging-livekit-dual-e2e.mjs",
     "test:e2e": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test",
     "test:e2e:dual": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test e2e/dual-browser-conference.spec.ts",
+    "test:e2e:guest": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test e2e/guest-shared-link-no-account.spec.ts",
+    "test:guest-security": "node --env-file=.env.staging.local scripts/guest-share-link-security-test.mjs",
     "test:e2e:org": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test e2e/organization-settings.spec.ts",
     "test:e2e:a11y": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test e2e/accessibility-keyboard.spec.ts e2e/responsive-a11y.spec.ts",
     "test:e2e:speaker": "node --env-file=.env.staging.local ./node_modules/@playwright/test/cli.js test e2e/active-speaker.spec.ts",

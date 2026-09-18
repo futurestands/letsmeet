@@ -59,20 +59,21 @@ Admin can administer allowed surfaces; owner-only paths fail server-side.
 
 ---
 
-## TEST: Guest browser account
+## TEST: Guest browser account (share-link, no account)
 
 **STEPS**
-1. Sign in (or join) as meeting **guest** without org membership.
-2. Confirm meeting media/collaboration access when invited.
-3. Open org Settings / member invite / audit / retention.
-4. Attempt org RPCs; confirm denial and no accidental membership.
+1. Host creates/starts a meeting on staging Preview and copies the share link / code.
+2. Open an isolated browser context with no cookies/localStorage auth.
+3. Open only `/#/join/<code>` — do not sign in or create an account.
+4. Enter display name, join, confirm LiveKit room + host visibility.
+5. Confirm guest has no org/workspace membership and no host End control.
 
 **EXPECTED RESULT**
-Guest can attend invited meeting only; no org administration; membership unchanged.
+Guest reaches the real meeting without registration, login, or org/workspace membership.
 
-**RESULT:** _(RPC invite matrix covers guest invite pending; dedicated guest browser account NOT RUN)_
+**RESULT:** Automated via `npm run test:e2e:guest` + `npm run test:guest-security` on staging (see PRODUCTION-READINESS). Human exploratory check still useful for UX polish.
 
-**STATUS:** NOT RUN
+**STATUS:** STAGING VERIFIED (automated); exploratory UX MANUAL OPTIONAL
 
 ---
 

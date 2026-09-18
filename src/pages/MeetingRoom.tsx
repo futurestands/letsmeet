@@ -5,6 +5,7 @@ import ConferenceRoom from '../components/ConferenceRoom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   findMeetingByCode,
+  joinMeetingByShareLink,
   joinPersistentMeeting,
   leavePersistentMeeting,
   transitionPersistentMeeting,
@@ -31,7 +32,7 @@ export default function MeetingRoom() {
   const navigate = useNavigate();
   const location = useLocation();
   const { meetingCode: routeCode } = useParams();
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const leaveInFlight = useRef(false);
   const settings = (location.state as MeetingLocationState | null)?.preJoinSettings;
   const [meeting, setMeeting] = useState<JoinedMeeting | null>(null);
@@ -59,9 +60,13 @@ export default function MeetingRoom() {
     if (!settings || !user?.id || !isValidMeetingCode(code)) return undefined;
     let active = true;
 
-    void Promise.all([joinPersistentMeeting(code), findMeetingByCode(code)])
+    const joinPromise = isGuest
+      ? joinMeetingByShareLink(code, user.full_name || 'Meeting guest')
+      : joinPersistentMeeting(code);
+
+    void Promise.all([joinPromise, findMeetingByCode(code).catch(() => null)])
       .then(([resolved, persisted]) => {
-        if (active) setMeeting({ ...resolved, ...persisted });
+        if (active) setMeeting({ ...resolved, ...(persisted ?? {}) });
       })
       .catch((error) => {
         if (active) setPageError(error instanceof Error ? error.message : 'Unable to load this meeting.');
@@ -70,7 +75,7 @@ export default function MeetingRoom() {
     return () => {
       active = false;
     };
-  }, [code, settings, user?.id]);
+  }, [code, isGuest, settings, user?.full_name, user?.id]);
 
   useEffect(() => {
     if (!persistentMeetingId || !user?.id) return undefined;

@@ -9,9 +9,12 @@ import { useMediaDevices } from '../hooks/useMediaDevices';
 type PreJoinExperienceProps = {
   meeting: MeetingSummary;
   displayName: string;
+  displayNameEditable?: boolean;
+  onDisplayNameChange?: (value: string) => void;
   joining: boolean;
   joinError: string | null;
-  onJoin: (settings: PreJoinSettings) => void;
+  guestMode?: boolean;
+  onJoin: (settings: PreJoinSettings, displayName: string) => void;
 };
 
 function DeviceSelect({
@@ -50,8 +53,11 @@ function DeviceSelect({
 export default function PreJoinExperience({
   meeting,
   displayName,
+  displayNameEditable = false,
+  onDisplayNameChange,
   joining,
   joinError,
+  guestMode = false,
   onJoin,
 }: PreJoinExperienceProps) {
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -142,7 +148,9 @@ export default function PreJoinExperience({
             <Video className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">Ready to join</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+              {guestMode ? 'Join as guest' : 'Ready to join'}
+            </p>
             <h1 className="text-xl font-bold text-slate-900">{meeting.title}</h1>
             <p className="text-sm text-slate-500">{meeting.code}</p>
           </div>
@@ -151,8 +159,20 @@ export default function PreJoinExperience({
         <div className="mt-6 space-y-4">
           <label className="block">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Display name</span>
-            <input value={displayName} readOnly className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700" />
+            <input
+              value={displayName}
+              readOnly={!displayNameEditable}
+              onChange={(event) => onDisplayNameChange?.(event.target.value)}
+              placeholder={guestMode ? 'Staging Guest' : undefined}
+              aria-label="Display name"
+              className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 ${displayNameEditable ? 'bg-white' : 'bg-slate-50'}`}
+            />
           </label>
+          {guestMode && (
+            <p className="text-xs text-slate-500">
+              No account required. Your name is shown to others in this meeting only.
+            </p>
+          )}
           <DeviceSelect label="Microphone" value={activeAudioDeviceId} devices={devices.microphones} disabled={!audioEnabled} onChange={setAudioDeviceId} />
           <DeviceSelect label="Camera" value={activeVideoDeviceId} devices={devices.cameras} disabled={!videoEnabled} onChange={setVideoDeviceId} />
           {devices.outputSelectionSupported && (
@@ -178,17 +198,17 @@ export default function PreJoinExperience({
         </p>
         <button
           type="button"
-          disabled={joining || !devices.supported}
+          disabled={joining || !devices.supported || (guestMode && displayName.trim().length < 2)}
           onClick={() => onJoin({
             audioEnabled,
             videoEnabled,
             audioDeviceId: activeAudioDeviceId,
             videoDeviceId: activeVideoDeviceId,
             audioOutputDeviceId: activeOutputDeviceId,
-          })}
+          }, displayName.trim())}
           className="btn-primary mt-5 w-full disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {joining ? 'Checking access…' : 'Join meeting'}
+          {joining ? 'Joining…' : 'Join meeting'}
         </button>
       </section>
     </div>

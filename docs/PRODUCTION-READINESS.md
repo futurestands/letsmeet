@@ -40,7 +40,8 @@ Status vocabulary (use only these):
 | Accessibility | PARTIALLY VERIFIED | Keyboard smoke; screen-reader MANUAL REQUIRED |
 | Responsive | VERIFIED | 390 / 768 / 1280 |
 | API | VERIFIED | Staging Render `/health` `/ready` + token auth; Server-Timing phases |
-| Database | VERIFIED | Staging migrations **001–014**; security suites |
+| Database | VERIFIED | Staging migrations **001–016**; security suites |
+| Guest share-link join | VERIFIED | Unauthenticated guest E2E + security matrix; no org/workspace membership |
 | Rate Limiting | VERIFIED | Multi-bucket policy unchanged; see `docs/RATE-LIMIT.md` |
 | Observability | PARTIALLY VERIFIED | Structured logs + Server-Timing on token mint |
 | CI | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/policy tests; Windows DB suites local |
@@ -68,5 +69,29 @@ Jobs must remain pending/queued/unconfigured until a real provider accepts them.
 
 ## Migrations
 
-Staging linked project `uasslvisjnwhdhcgqwyc` has migrations **001–014** applied via Supabase CLI (`supabase db push --linked`).  
+Staging linked project `uasslvisjnwhdhcgqwyc` has migrations **001–016** applied via Supabase CLI (`supabase db push --linked`).  
 Never apply from production-oriented `.env.local` (`wvmmofornwivfsjeqmda`).
+
+## Guest share-link join (IMPLEMENTED + STAGING VERIFIED)
+
+Implemented:
+- Public `/join/:code` route (no account required)
+- Render `/api/guest/meeting-preview` + `/api/guest/session` (ephemeral guest auth user)
+- RPCs `lookup_meeting_share_link` / `join_meeting_by_share_link` (migration 015)
+- Guests blocked from `ensure_user_profile_context` org provisioning (migration 016)
+- Guests never receive organization or workspace membership
+- LiveKit token still requires a real meeting participant row
+
+Staging verification evidence (this pass):
+- Dedicated Playwright: `e2e/guest-shared-link-no-account.spec.ts` (`npm run test:e2e:guest`)
+- Security matrix: `npm run test:guest-security`
+- Local staging-API probe of preview → guest session → share-link join with org_count=0
+- Share URL uses meeting code only (`LM-XXXXXX`); no credentials in the link
+
+Run staging E2E against the deployed Preview + Render after this commit is live.
+
+Not claimed:
+- Production readiness of the whole platform
+- Human-ear audio
+- 500 participants
+- Provider-backed recording / transcription / AI

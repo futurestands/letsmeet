@@ -8,6 +8,7 @@ import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStat
 import { aiStatusPayload, executeAiJob } from './ai.mjs';
 import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
+import { createGuestSessionHandlers } from './guest-session.mjs';
 
 dotenv.config();
 
@@ -18,6 +19,9 @@ const tokenRateLimiter = createRateLimiter();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+// Prefer publishable/anon for password grant when present; fall back to service role (server-only).
+const supabaseAuthKey = supabaseAnonKey || supabaseServiceRoleKey;
 const livekitHost = process.env.LIVEKIT_HOST;
 const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
   ? createClient(supabaseUrl, supabaseServiceRoleKey, {
@@ -48,6 +52,7 @@ app.get('/ready', (_req, res) => {
   const dependencies = {
     supabaseAdmin: Boolean(supabaseAdmin),
     livekit: Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && livekitHost),
+    guestJoin: Boolean(supabaseAdmin && supabaseUrl && supabaseAuthKey),
   };
   const ready = dependencies.supabaseAdmin && dependencies.livekit;
   res.status(ready ? 200 : 503).json({
@@ -96,6 +101,21 @@ app.get('/api/ai/status', (_req, res) => {
 
 app.get('/api/transcription/status', (_req, res) => {
   res.json(transcriptionStatusPayload());
+});
+
+const guestHandlers = createGuestSessionHandlers({
+  supabaseAdmin,
+  supabaseUrl,
+  authKey: supabaseAuthKey,
+  logEvent,
+});
+
+app.get('/api/guest/meeting-preview', (req, res) => {
+  void guestHandlers.previewMeeting(req, res);
+});
+
+app.post('/api/guest/session', (req, res) => {
+  void guestHandlers.createGuestSession(req, res);
 });
 
 app.get('/api/livekit/token', async (req, res) => {

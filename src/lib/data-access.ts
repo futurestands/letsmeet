@@ -463,6 +463,80 @@ export async function lookupJoinableMeeting(code: string): Promise<MeetingSummar
   return data as MeetingSummary;
 }
 
+export async function lookupMeetingShareLink(code: string): Promise<MeetingSummary> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) {
+    throw new Error('Enter a valid six-character meeting code.');
+  }
+  const { data, error } = await supabase.rpc('lookup_meeting_share_link', { p_code: normalizedCode });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as MeetingSummary | null;
+  if (!row) throw new Error('Meeting not found or you do not have access to it.');
+  return row;
+}
+
+export async function joinMeetingByShareLink(code: string, displayName: string): Promise<JoinedMeeting> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) {
+    throw new Error('Enter a valid six-character meeting code.');
+  }
+  const { data, error } = await supabase.rpc('join_meeting_by_share_link', {
+    p_code: normalizedCode,
+    p_display_name: displayName,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, string> | null;
+  if (!row) throw new Error('Meeting could not be joined.');
+  return mapJoinedMeeting(row);
+}
+
+export type GuestMeetingPreview = {
+  code: string;
+  title: string;
+  status: string;
+};
+
+export async function previewGuestMeeting(code: string): Promise<GuestMeetingPreview> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) {
+    throw new Error('Enter a valid six-character meeting code.');
+  }
+  const endpoint = import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined;
+  if (!endpoint) throw new Error('Meeting preview is unavailable.');
+  const previewUrl = endpoint.replace(/\/api\/livekit\/token\/?$/, '/api/guest/meeting-preview');
+  const response = await fetch(`${previewUrl}?room=${encodeURIComponent(normalizedCode)}`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(body.error ?? 'Unable to open this meeting.'));
+  }
+  return body as GuestMeetingPreview;
+}
+
+export async function createGuestJoinSession(code: string, displayName: string): Promise<{
+  access_token: string;
+  refresh_token: string;
+  user: { id: string; displayName: string; guest: boolean };
+  meeting: GuestMeetingPreview;
+}> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) {
+    throw new Error('Enter a valid six-character meeting code.');
+  }
+  const endpoint = import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined;
+  if (!endpoint) throw new Error('Guest join is unavailable.');
+  const sessionUrl = endpoint.replace(/\/api\/livekit\/token\/?$/, '/api/guest/session');
+  const response = await fetch(sessionUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ room: normalizedCode, displayName }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(body.error ?? 'Unable to start a guest session.'));
+  }
+  return body;
+}
+
 export async function acceptMeetingInvite(meetingId: string): Promise<MeetingInvite> {
   const { data, error } = await supabase.rpc('accept_meeting_invite', { p_meeting_id: meetingId });
   if (error) throw error;

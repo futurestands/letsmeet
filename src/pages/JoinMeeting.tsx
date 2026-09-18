@@ -3,19 +3,33 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Link2, Video } from 'lucide-react';
 import PreJoinExperience from '../components/PreJoinExperience';
 import { useAuth } from '../contexts/AuthContext';
-import { findMeetingByCode, joinPersistentMeeting, lookupJoinableMeeting, type MeetingSummary } from '../lib/data-access';
+import {
+  createGuestJoinSession,
+  findMeetingByCode,
+  joinMeetingByShareLink,
+  joinPersistentMeeting,
+  lookupJoinableMeeting,
+  lookupMeetingShareLink,
+  previewGuestMeeting,
+  type MeetingSummary,
+} from '../lib/data-access';
 import type { PreJoinSettings } from '../lib/conference-utils';
 import { isValidMeetingCode, meetingRoomPath, normalizeMeetingCode } from '../lib/meeting-utils';
 
 export default function JoinMeeting() {
   const navigate = useNavigate();
   const { meetingCode: routeCode } = useParams();
-  const { user } = useAuth();
+  const { user, isGuest, applySession } = useAuth();
   const [meetingCode, setMeetingCode] = useState(routeCode ?? '');
   const [meeting, setMeeting] = useState<MeetingSummary | null>(null);
+  const [guestDisplayName, setGuestDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [joining, setJoining] = useState(false);
+
+  const displayName = !user || isGuest
+    ? guestDisplayName
+    : (user.full_name || '');
 
   const resolveMeeting = useCallback(async (rawCode: string) => {
     const normalizedCode = normalizeMeetingCode(rawCode);
@@ -27,6 +41,27 @@ export default function JoinMeeting() {
     try {
       setChecking(true);
       setError(null);
+
+      if (!user) {
+        const preview = await previewGuestMeeting(normalizedCode);
+        setMeeting({
+          id: `preview-${preview.code}`,
+          code: preview.code,
+          title: preview.title,
+          host_id: '',
+          status: preview.status as MeetingSummary['status'],
+          organization_id: '',
+          workspace_id: '',
+        });
+        return;
+      }
+
+      if (isGuest) {
+        const resolved = await lookupMeetingShareLink(normalizedCode);
+        setMeeting(resolved);
+        return;
+      }
+
       const resolved = await lookupJoinableMeeting(normalizedCode).catch(async (lookupError) => {
         const fallback = await findMeetingByCode(normalizedCode);
         if (fallback) return fallback;
@@ -42,11 +77,12 @@ export default function JoinMeeting() {
       }
       setMeeting(resolved);
     } catch (resolveError) {
+      setMeeting(null);
       setError(resolveError instanceof Error ? resolveError.message : 'Unable to open this meeting.');
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [isGuest, user]);
 
   useEffect(() => {
     if (!routeCode) return undefined;
@@ -56,13 +92,42 @@ export default function JoinMeeting() {
     return () => window.clearTimeout(timer);
   }, [resolveMeeting, routeCode]);
 
-  const joinMeeting = async (settings: PreJoinSettings) => {
+  const joinMeeting = async (settings: PreJoinSettings, name: string) => {
     if (!meeting) return;
+    const trimmedName = name.trim();
+    if ((!user || isGuest) && trimmedName.length < 2) {
+      setError('Enter a display name to join as a guest.');
+      return;
+    }
+
     try {
       setJoining(true);
       setError(null);
-      const joined = await joinPersistentMeeting(meeting.code);
-      navigate(meetingRoomPath(joined.code), {
+
+      if (!user) {
+        const session = await createGuestJoinSession(meeting.code, trimmedName);
+        const applied = await applySession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
+        if (applied.error) {
+          throw new Error(applied.error.message || 'Unable to start a guest session.');
+        }
+        await joinMeetingByShareLink(meeting.code, trimmedName);
+        navigate(meetingRoomPath(meeting.code), {
+          replace: true,
+          state: { preJoinSettings: settings },
+        });
+        return;
+      }
+
+      if (isGuest) {
+        await joinMeetingByShareLink(meeting.code, trimmedName || user.full_name);
+      } else {
+        await joinPersistentMeeting(meeting.code);
+      }
+
+      navigate(meetingRoomPath(meeting.code), {
         replace: true,
         state: { preJoinSettings: settings },
       });
@@ -82,7 +147,9 @@ export default function JoinMeeting() {
               <ArrowLeft className="h-4 w-4" />
             </button>
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Pre-join</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                {!user || isGuest ? 'Guest pre-join' : 'Pre-join'}
+              </p>
               <h1 className="text-lg font-semibold text-slate-900">Check your camera and microphone</h1>
             </div>
           </div>
@@ -90,10 +157,13 @@ export default function JoinMeeting() {
         <main className="mx-auto max-w-6xl px-6 py-10">
           <PreJoinExperience
             meeting={meeting}
-            displayName={user?.full_name ?? 'Meeting participant'}
+            displayName={displayName || (!user || isGuest ? '' : 'Meeting participant')}
+            displayNameEditable={!user || isGuest}
+            onDisplayNameChange={setGuestDisplayName}
             joining={joining}
             joinError={error}
-            onJoin={(settings) => void joinMeeting(settings)}
+            guestMode={!user || isGuest}
+            onJoin={(settings, name) => void joinMeeting(settings, name)}
           />
         </main>
       </div>
@@ -105,9 +175,9 @@ export default function JoinMeeting() {
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-4">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate(user && !isGuest ? '/' : '/auth')}
             className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700"
-            aria-label="Back to home"
+            aria-label="Back"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -126,6 +196,9 @@ export default function JoinMeeting() {
             </div>
             <h2 className="text-2xl font-bold text-slate-900">Join a meeting</h2>
           </div>
+          <p className="mb-6 text-sm text-slate-600">
+            Guests can join from a shared link without creating an account. Enter the meeting code to continue.
+          </p>
 
           <form
             className="space-y-6"
@@ -144,6 +217,7 @@ export default function JoinMeeting() {
                 autoComplete="off"
                 className="input-field pl-10"
                 disabled={checking}
+                aria-label="Meeting code"
               />
             </div>
 
