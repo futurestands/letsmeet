@@ -21,8 +21,26 @@ export function canCreatePoll(options: string[], question: string): boolean {
   return Boolean(question.trim()) && sanitizePollOptions(options).length >= POLL_OPTION_LIMITS.min;
 }
 
-export function isWhiteboardOpType(value: string): value is (typeof WHITEBOARD_OP_TYPES)[number] {
-  return WHITEBOARD_OP_TYPES.includes(value as (typeof WHITEBOARD_OP_TYPES)[number]);
+export function replayWhiteboardOps(ops: Array<{ op: { type: string; points?: number[][]; color?: string } }>) {
+  const visible: Array<{ type: string; points?: number[][]; color?: string }> = [];
+  const redo: Array<{ type: string; points?: number[][]; color?: string }> = [];
+  for (const item of ops) {
+    const op = item.op;
+    if (op.type === 'stroke') {
+      visible.push(op);
+      redo.length = 0;
+    } else if (op.type === 'clear') {
+      visible.length = 0;
+      redo.length = 0;
+    } else if (op.type === 'undo') {
+      const last = visible.pop();
+      if (last) redo.push(last);
+    } else if (op.type === 'redo') {
+      const next = redo.pop();
+      if (next) visible.push(next);
+    }
+  }
+  return visible;
 }
 
 export function recordingStatusLabel(status?: string | null): string {

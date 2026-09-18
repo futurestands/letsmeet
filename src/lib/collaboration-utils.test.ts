@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiJobStatusLabel, canCreatePoll, recordingStatusLabel, sanitizePollOptions } from './collaboration-utils';
+import { aiJobStatusLabel, canCreatePoll, recordingStatusLabel, replayWhiteboardOps, sanitizePollOptions } from './collaboration-utils';
 import { describeNotificationDispatch, notificationProviderConfigured } from '../../server/notifications.mjs';
 import { describeRecordingDispatch, recordingStorageConfigured } from '../../server/recordings.mjs';
 
@@ -14,6 +14,23 @@ describe('collaboration helpers', () => {
     expect(recordingStatusLabel('queued')).toContain('Queued');
     expect(recordingStatusLabel('completed')).toBe('Ready to play');
     expect(aiJobStatusLabel('unconfigured')).toContain('AI provider');
+  });
+
+  it('replays whiteboard undo and redo without client-only state', () => {
+    const strokeA = { type: 'stroke', points: [[0, 0], [1, 1]], color: '#93c5fd' };
+    const strokeB = { type: 'stroke', points: [[2, 2], [3, 3]], color: '#93c5fd' };
+    expect(replayWhiteboardOps([
+      { op: strokeA },
+      { op: strokeB },
+      { op: { type: 'undo' } },
+      { op: { type: 'redo' } },
+      { op: { type: 'undo' } },
+    ])).toEqual([strokeA]);
+    expect(replayWhiteboardOps([
+      { op: strokeA },
+      { op: { type: 'clear' } },
+      { op: strokeB },
+    ])).toEqual([strokeB]);
   });
 });
 

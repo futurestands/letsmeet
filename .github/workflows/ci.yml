@@ -26,5 +26,11 @@ jobs:
             echo "Tracked env files are not allowed"
             exit 1
           fi
-          echo "No tracked env files"
+          if git grep -I -n -E 'BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY=[^y]|LIVEKIT_API_SECRET=[^y]' -- ':!.env.example' ':!*.md'; then
+            echo "Possible secret material found in tracked files"
+            exit 1
+          fi
+          echo "No tracked env files or obvious secret material"
         shell: bash
+      - name: Note Windows-only DB suites
+        run: echo "phase2-6 PostgreSQL security suites require local/Windows Postgres and are executed outside GitHub Actions."

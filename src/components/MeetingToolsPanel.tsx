@@ -28,7 +28,7 @@ import {
   type WhiteboardOp,
   type WhiteboardPage,
 } from '../lib/data-access';
-import { aiJobStatusLabel, canCreatePoll, recordingStatusLabel, sanitizePollOptions } from '../lib/collaboration-utils';
+import { aiJobStatusLabel, canCreatePoll, recordingStatusLabel, replayWhiteboardOps, sanitizePollOptions } from '../lib/collaboration-utils';
 import { supabase } from '../lib/supabase';
 
 type ToolsTab = 'polls' | 'qa' | 'notes' | 'board' | 'intel';
@@ -337,16 +337,12 @@ function WhiteboardCanvas({
     if (!context) return;
     context.fillStyle = '#0f172a';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    let visible = [...ops];
-    for (const op of ops) {
-      if (op.op.type === 'clear') visible = [];
-      if (op.op.type === 'undo') visible = visible.slice(0, -1);
-    }
+    const visible = replayWhiteboardOps(ops);
     context.strokeStyle = '#93c5fd';
     context.lineWidth = 2;
     for (const item of visible) {
-      const points = item.op.points ?? [];
-      if (item.op.type !== 'stroke' || points.length < 2) continue;
+      const points = item.points ?? [];
+      if (item.type !== 'stroke' || points.length < 2) continue;
       context.beginPath();
       context.moveTo(points[0][0], points[0][1]);
       for (const point of points.slice(1)) context.lineTo(point[0], point[1]);
@@ -361,6 +357,8 @@ function WhiteboardCanvas({
         width={640}
         height={360}
         className="w-full rounded-xl border border-slate-700 bg-slate-950"
+        aria-label="Meeting whiteboard"
+        role="img"
         onPointerDown={(event) => {
           const bounds = event.currentTarget.getBoundingClientRect();
           stroke.current = [[event.clientX - bounds.left, event.clientY - bounds.top]];
@@ -376,9 +374,9 @@ function WhiteboardCanvas({
         }}
       />
       <div className="flex gap-2 text-xs">
-        <button onClick={() => onOp({ type: 'undo' })}>Undo</button>
-        <button onClick={() => onOp({ type: 'redo' })}>Redo</button>
-        <button onClick={() => onOp({ type: 'clear' })}>Clear</button>
+        <button type="button" onClick={() => onOp({ type: 'undo' })} aria-label="Undo last stroke">Undo</button>
+        <button type="button" onClick={() => onOp({ type: 'redo' })} aria-label="Redo last stroke">Redo</button>
+        <button type="button" onClick={() => onOp({ type: 'clear' })} aria-label="Clear whiteboard">Clear</button>
       </div>
     </div>
   );

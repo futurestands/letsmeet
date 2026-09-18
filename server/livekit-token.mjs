@@ -336,17 +336,21 @@ app.post('/api/recordings/start', async (req, res) => {
 
 async function dispatchDueNotificationJobs() {
   if (!supabaseAdmin) return;
+  const nowIso = new Date().toISOString();
   const { data: jobs, error } = await supabaseAdmin
     .from('meeting_notification_jobs')
-    .select('id, meeting_id, invite_id, organization_id, workspace_id, channel, template, status, recipient, scheduled_for, next_attempt_at, attempt_count')
+    .select('id, meeting_id, invite_id, organization_id, workspace_id, channel, template, status, recipient, scheduled_for, next_attempt_at, attempt_count, max_attempts, idempotency_key')
     .eq('status', 'pending')
-    .lte('scheduled_for', new Date().toISOString())
-    .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
+    .lte('scheduled_for', nowIso)
+    .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
     .limit(20);
   if (error || !jobs?.length) return;
 
   for (const job of jobs) {
-    const result = await dispatchNotificationJob(job, {
+    const { data: claimed } = await supabaseAdmin.rpc('claim_notification_job', { p_job_id: job.id });
+    if (!claimed) continue;
+
+    const result = await dispatchNotificationJob(claimed, {
       async deliverInApp(current) {
         const { data: user } = await supabaseAdmin
           .from('users')
@@ -354,6 +358,7 @@ async function dispatchDueNotificationJobs() {
           .eq('email', current.recipient)
           .maybeSingle();
         if (!user) {
+          await supabaseAdmin.rpc('release_notification_job', { p_job_id: current.id });
           return { delivered: false, skipped: true, reason: 'Recipient does not have an account yet.' };
         }
         const { error: insertError } = await supabaseAdmin.from('in_app_notifications').insert({
@@ -364,21 +369,32 @@ async function dispatchDueNotificationJobs() {
           meeting_id: current.meeting_id,
         });
         if (insertError) return { delivered: false, skipped: false, reason: insertError.message };
-        await supabaseAdmin.from('meeting_notification_jobs').update({
-          status: 'sent',
-          sent_at: new Date().toISOString(),
-          provider: 'in_app',
-        }).eq('id', current.id);
+        await supabaseAdmin.rpc('complete_notification_job', {
+          p_job_id: current.id,
+          p_provider: 'in_app',
+          p_provider_message_id: null,
+        });
         return { delivered: true, skipped: false };
       },
     });
-    if (!result.delivered && !result.skipped) {
-      await supabaseAdmin.from('meeting_notification_jobs').update({
-        attempt_count: (job.attempt_count ?? 0) + 1,
-        last_error: String(result.reason ?? 'Delivery failed').slice(0, 500),
-        status: 'pending',
-      }).eq('id', job.id);
+
+    if (result.delivered) continue;
+    if (result.skipped) {
+      // Leave email/SMS pending without claiming delivery. Release processing lock.
+      await supabaseAdmin.rpc('release_notification_job', { p_job_id: job.id });
+      continue;
     }
+
+    const attempts = (job.attempt_count ?? 0) + 1;
+    const maxAttempts = job.max_attempts ?? 5;
+    await supabaseAdmin.from('meeting_notification_jobs').update({
+      attempt_count: attempts,
+      last_error: String(result.reason ?? 'Delivery failed').slice(0, 500),
+      status: attempts >= maxAttempts ? 'failed' : 'pending',
+      next_attempt_at: attempts >= maxAttempts
+        ? null
+        : new Date(Date.now() + (2 ** Math.max(attempts - 1, 0)) * 60_000).toISOString(),
+    }).eq('id', job.id);
   }
 }
 

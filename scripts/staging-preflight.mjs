@@ -16,6 +16,7 @@ const requiredMigrations = [
   '008_invite_acceptance_and_reminders.sql',
   '009_collaboration.sql',
   '010_recordings_ai_enterprise.sql',
+  '011_hardening_indexes_and_audit.sql',
 ];
 const publicVariables = [
   'VITE_SUPABASE_URL',
