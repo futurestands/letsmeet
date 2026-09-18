@@ -1,17 +1,21 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Video, ArrowRight, CalendarClock, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, user } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (user) navigate('/', { replace: true });
+  }, [navigate, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
