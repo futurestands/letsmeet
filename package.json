@@ -11,6 +11,10 @@
     "test": "vitest run",
     "test:phase3-db": "node scripts/phase3-db-security-test.mjs",
     "test:phase3-livekit": "node scripts/phase3-livekit-endpoint-test.mjs",
+    "staging:preflight": "node scripts/staging-preflight.mjs",
+    "staging:seed": "node --env-file=.env.staging.local scripts/staging-seed.mjs",
+    "dev:staging": "vite --mode staging",
+    "server:staging": "node --env-file=.env.staging.local server/livekit-token.mjs",
     "db:migrate": "node scripts/migrate.js",
     "db:migrate:dry": "node scripts/migrate.js --dry",
     "server:livekit-token": "node server/livekit-token.mjs"

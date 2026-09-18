@@ -13,9 +13,12 @@ dist-ssr
 *.local
 
 # Environment variables - NEVER commit these
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
+!.env.*.example
+
+# Supabase CLI project links and transient state
+supabase/.temp/
 
 # Editor directories and files
 .vscode/*

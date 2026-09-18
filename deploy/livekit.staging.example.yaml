@@ -1,0 +1,24 @@
+# Template only. Replace hostnames and inject API keys through the deployment secret store.
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+
+# Prefer injecting LIVEKIT_KEYS rather than committing a keys block.
+keys: {}
+
+turn:
+  enabled: true
+  domain: turn.staging.example.com
+  udp_port: 3478
+  tls_port: 5349
+  cert_file: /run/secrets/turn-fullchain.pem
+  key_file: /run/secrets/turn-privkey.pem
+
+logging:
+  level: info
