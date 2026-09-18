@@ -27,7 +27,7 @@ test('host admin moderation: mute, remove, and end remain authoritative', async 
 
     // Prefer side-panel moderation controls — tile hover controls can be covered by LiveKit name overlays.
     await hostPage.getByRole('button', { name: 'Toggle participants' }).click();
-    await expect(hostPage.getByRole('complementary', { name: 'Participants' }).or(hostPage.getByText(/Participants \(/))).toBeVisible({ timeout: 15_000 });
+    await expect(hostPage.getByRole('heading', { name: /Participants \(/ })).toBeVisible({ timeout: 15_000 });
 
     const muteButton = hostPage.getByRole('button', { name: /Mute Staging Test Participant|Mute /i }).first();
     await muteButton.click({ force: true });
