@@ -123,6 +123,23 @@ describe('LiveKit authorization', () => {
     expect(member).toMatchObject({ ok: true, identity: 'user-b', isHost: false });
   });
 
+  it('allows invited guests with a participant row even without org membership', () => {
+    expect(evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-guest',
+      userName: 'Guest',
+      requestedRoom: meeting.code,
+      meeting,
+      participant: {
+        ...memberParticipant,
+        id: 'p-guest',
+        user_id: 'user-guest',
+      },
+      organizationMember: false,
+      workspaceMember: false,
+    })).toMatchObject({ ok: true, identity: 'user-guest', isHost: false });
+  });
+
   it('rejects departed or removed participants', () => {
     expect(evaluateLiveKitAccess({
       isAuthenticated: true,

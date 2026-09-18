@@ -39,6 +39,8 @@ export default function MeetingDetails() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [inviteText, setInviteText] = useState('');
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
@@ -94,10 +96,13 @@ export default function MeetingDetails() {
   const cancelMeeting = async () => {
     if (!meeting || busy) return;
     setBusy(true);
+    setError(null);
     try {
       const next = await transitionPersistentMeeting(meeting.id, 'cancelled');
       setMeeting(next);
       setEditing(false);
+      setConfirmCancel(false);
+      setNotice('The meeting was cancelled. Invitees can no longer join.');
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : 'Unable to cancel this meeting.');
     } finally {
@@ -131,6 +136,7 @@ export default function MeetingDetails() {
         scheduled_for: next.scheduled_for,
       } : current);
       setEditing(false);
+      setNotice('Meeting details were updated.');
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to update this meeting.');
     } finally {
@@ -156,6 +162,7 @@ export default function MeetingDetails() {
         return next;
       });
       setInviteText('');
+      setNotice(`Saved ${created.length} invitation${created.length === 1 ? '' : 's'}. Email delivery stays queued until a provider is configured.`);
     } catch (inviteError) {
       setError(inviteError instanceof Error ? inviteError.message : 'Unable to save invitations.');
     } finally {
@@ -220,6 +227,7 @@ export default function MeetingDetails() {
 
       <main className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+        {notice && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</div>}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -247,11 +255,22 @@ export default function MeetingDetails() {
                 <button onClick={() => setEditing((value) => !value)} className="btn-secondary">{editing ? 'Close editor' : 'Edit / reschedule'}</button>
               )}
               {canCancel && (
-                <button onClick={() => void cancelMeeting()} disabled={busy} className="btn-secondary disabled:opacity-50">Cancel meeting</button>
+                <button onClick={() => setConfirmCancel(true)} disabled={busy} className="btn-secondary disabled:opacity-50">Cancel meeting</button>
               )}
             </div>
           </div>
         </section>
+
+        {confirmCancel && (
+          <section className="rounded-2xl border border-red-200 bg-red-50 p-5" role="alertdialog" aria-labelledby="cancel-meeting-title">
+            <h2 id="cancel-meeting-title" className="text-lg font-semibold text-red-900">Cancel this meeting?</h2>
+            <p className="mt-2 text-sm text-red-800">Invitees will not be able to join, and reminder jobs will stop. This cannot be undone.</p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button onClick={() => void cancelMeeting()} disabled={busy} className="btn-primary bg-red-600 hover:bg-red-700 disabled:opacity-50">Confirm cancellation</button>
+              <button onClick={() => setConfirmCancel(false)} className="btn-secondary">Keep meeting</button>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold text-slate-900"><Link2 className="h-5 w-5" /> Invitation</h2>
@@ -259,7 +278,16 @@ export default function MeetingDetails() {
             <input readOnly value={shareLink} className="input-field min-w-0 flex-1" />
             <button
               onClick={() => {
-                void navigator.clipboard.writeText(shareLink).then(() => setCopied(true));
+                const invitation = [
+                  meeting.title,
+                  meeting.scheduled_for ? formatZonedDateTime(meeting.scheduled_for, viewerZone) : '',
+                  `Code ${meeting.code}`,
+                  shareLink,
+                ].filter(Boolean).join('\n');
+                void navigator.clipboard.writeText(invitation).then(() => {
+                  setCopied(true);
+                  setNotice('Invitation copied.');
+                });
               }}
               className="btn-secondary"
             >

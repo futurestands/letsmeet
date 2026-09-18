@@ -13,6 +13,9 @@ const requiredMigrations = [
   '005_realtime_conferencing.sql',
   '006_supabase_pgcrypto_compatibility.sql',
   '007_scheduling_invitations.sql',
+  '008_invite_acceptance_and_reminders.sql',
+  '009_collaboration.sql',
+  '010_recordings_ai_enterprise.sql',
 ];
 const publicVariables = [
   'VITE_SUPABASE_URL',

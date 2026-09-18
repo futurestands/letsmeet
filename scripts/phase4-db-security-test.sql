@@ -128,6 +128,49 @@ BEGIN
   PERFORM public.phase4_assert('host can reschedule', meeting_a.title = 'Planning updated' AND meeting_a.duration_minutes = 60);
 
   SET ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', user_a::text, false);
+  BEGIN
+    PERFORM public.schedule_persistent_meeting('Too late', CURRENT_DATE - 1, '09:00', 'UTC', workspace_a);
+    PERFORM public.phase4_assert('past scheduled time is rejected', false, 'past schedule succeeded');
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM public.phase4_assert('past scheduled time is rejected', true, SQLERRM);
+  END;
+  SELECT * INTO scheduled_a FROM public.schedule_persistent_meeting(
+    'Planning updated', CURRENT_DATE + 2, '09:30', 'UTC', workspace_a, 'New agenda', 60
+  );
+  RESET ROLE;
+  PERFORM public.phase4_assert('rapid resubmit reuses the same scheduled meeting', scheduled_a.meeting_code = meeting_a.code);
+
+  SET ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', user_a::text, false);
+  PERFORM public.invite_to_persistent_meeting(meeting_a.id, 'c@example.com');
+  RESET ROLE;
+
+  SET ROLE authenticated;
+  PERFORM set_config('request.jwt.claim.sub', user_c::text, false);
+  BEGIN
+    PERFORM public.lookup_joinable_meeting(meeting_a.code);
+    PERFORM public.phase4_assert('invited outsider can look up the meeting by code', true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM public.phase4_assert('invited outsider can look up the meeting by code', false, SQLERRM);
+  END;
+  BEGIN
+    PERFORM public.join_persistent_meeting(meeting_a.code);
+    PERFORM public.phase4_assert('invited outsider can join without org membership', true);
+  EXCEPTION WHEN OTHERS THEN
+    PERFORM public.phase4_assert('invited outsider can join without org membership', false, SQLERRM);
+  END;
+  RESET ROLE;
+  PERFORM public.phase4_assert('guest join does not create a foreign org membership', NOT EXISTS (
+    SELECT 1 FROM public.organization_members
+    WHERE organization_id = org_a AND user_id = user_c
+  ));
+  PERFORM public.phase4_assert('guest join creates a participant row', EXISTS (
+    SELECT 1 FROM public.meeting_participants
+    WHERE meeting_id = meeting_a.id AND user_id = user_c AND status IN ('waiting', 'joined')
+  ));
+
+  SET ROLE authenticated;
   PERFORM set_config('request.jwt.claim.sub', user_c::text, false);
   BEGIN
     INSERT INTO public.meeting_invites (meeting_id, email, organization_id, workspace_id, status)

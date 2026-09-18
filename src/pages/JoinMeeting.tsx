@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Link2, Video } from 'lucide-react';
 import PreJoinExperience from '../components/PreJoinExperience';
 import { useAuth } from '../contexts/AuthContext';
-import { findMeetingByCode, joinPersistentMeeting, type MeetingSummary } from '../lib/data-access';
+import { findMeetingByCode, joinPersistentMeeting, lookupJoinableMeeting, type MeetingSummary } from '../lib/data-access';
 import type { PreJoinSettings } from '../lib/conference-utils';
 import { isValidMeetingCode, meetingRoomPath, normalizeMeetingCode } from '../lib/meeting-utils';
 
@@ -27,10 +27,17 @@ export default function JoinMeeting() {
     try {
       setChecking(true);
       setError(null);
-      const resolved = await findMeetingByCode(normalizedCode);
+      const resolved = await lookupJoinableMeeting(normalizedCode).catch(async (lookupError) => {
+        const fallback = await findMeetingByCode(normalizedCode);
+        if (fallback) return fallback;
+        throw lookupError;
+      });
       if (!resolved) throw new Error('Meeting not found or you do not have access to it.');
       if (resolved.status === 'ended' || resolved.status === 'cancelled') {
-        navigate(`/meetings/${resolved.id}`, { replace: true });
+        setMeeting(null);
+        setError(resolved.status === 'cancelled'
+          ? 'This meeting was cancelled and cannot be joined.'
+          : 'This meeting has ended and cannot be rejoined.');
         return;
       }
       setMeeting(resolved);
@@ -39,7 +46,7 @@ export default function JoinMeeting() {
     } finally {
       setChecking(false);
     }
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
     if (!routeCode) return undefined;

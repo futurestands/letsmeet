@@ -12,6 +12,8 @@
     "test:phase3-db": "node scripts/phase3-db-security-test.mjs",
     "test:phase3-livekit": "node scripts/phase3-livekit-endpoint-test.mjs",
     "test:phase4-db": "node scripts/phase4-db-security-test.mjs",
+    "test:phase5-db": "node scripts/phase5-db-security-test.mjs",
+    "test:load": "node scripts/load-test-meetings.mjs",
     "staging:preflight": "node scripts/staging-preflight.mjs",
     "staging:seed": "node --env-file=.env.staging.local scripts/staging-seed.mjs",
     "dev:staging": "vite --mode staging",

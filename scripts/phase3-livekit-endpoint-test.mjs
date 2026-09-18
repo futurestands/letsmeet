@@ -41,6 +41,11 @@ const assertStatus = async (name, request, expected) => {
 
 try {
   await assertStatus(
+    'health endpoint',
+    fetch(`http://127.0.0.1:${port}/health`),
+    200,
+  );
+  await assertStatus(
     'unauthenticated token request',
     fetch(`http://127.0.0.1:${port}/api/livekit/token?room=LM-ABC234`),
     401,
@@ -65,7 +70,7 @@ try {
     }),
     403,
   );
-  console.log(`LiveKit endpoint assertions: ${passed}/3 passed`);
+  console.log(`LiveKit endpoint assertions: ${passed}/4 passed`);
 } finally {
   child.kill();
 }

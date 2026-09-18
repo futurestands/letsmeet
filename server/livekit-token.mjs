@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
+import { dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
+import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, aiProviderConfigured, transcriptionProviderConfigured } from './recordings.mjs';
 
 dotenv.config();
 
@@ -19,7 +21,29 @@ const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
     })
   : null;
 
-app.use(express.json());
+app.use(express.json({ limit: '32kb' }));
+
+const rateBuckets = new Map();
+function allowRequest(key, limit, windowMs) {
+  const now = Date.now();
+  const next = (rateBuckets.get(key) ?? []).filter((stamp) => now - stamp < windowMs);
+  if (next.length >= limit) {
+    rateBuckets.set(key, next);
+    return false;
+  }
+  next.push(now);
+  rateBuckets.set(key, next);
+  return true;
+}
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.get('/ready', (_req, res) => {
+  const ready = Boolean(supabaseAdmin && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready' });
+});
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -41,7 +65,24 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/api/notifications/status', (_req, res) => {
+  res.json(notificationStatusPayload());
+});
+
+app.get('/api/recordings/status', (_req, res) => {
+  res.json({
+    ...recordingStatusPayload(),
+    transcriptionConfigured: transcriptionProviderConfigured(),
+    aiConfigured: aiProviderConfigured(),
+  });
+});
+
 app.get('/api/livekit/token', async (req, res) => {
+  const clientKey = `${req.ip}:${req.headers.authorization || 'anon'}`;
+  if (!allowRequest(`token:${clientKey}`, 30, 60_000)) {
+    return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
+  }
+
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const room = normalizeRoomCode(req.query.room);
@@ -222,6 +263,128 @@ app.post('/api/livekit/moderate', async (req, res) => {
   }
 });
 
+app.post('/api/recordings/start', async (req, res) => {
+  const recordingId = String(req.body?.recordingId ?? '');
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!/^[0-9a-f-]{36}$/i.test(recordingId)) return res.status(400).json({ error: 'Recording identifier is invalid.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const { data: recording, error: recordingError } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, meeting_id, organization_id, workspace_id, started_by, status')
+      .eq('id', recordingId)
+      .maybeSingle();
+    if (recordingError) return res.status(500).json({ error: 'Unable to resolve the recording.' });
+    if (!recording) return res.status(404).json({ error: 'Recording not found.' });
+    if (recording.started_by !== user.id) return res.status(403).json({ error: 'Only the host can start this recording.' });
+
+    const { data: meeting } = await supabaseAdmin
+      .from('meetings')
+      .select('id, code, host_id, status')
+      .eq('id', recording.meeting_id)
+      .maybeSingle();
+    if (!meeting || meeting.host_id !== user.id) return res.status(403).json({ error: 'Only the host can start this recording.' });
+
+    const dispatch = describeRecordingDispatch(recording);
+    const storage = createRecordingStorageAdapter();
+    if (!storage || !process.env.LIVEKIT_HOST || !process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+      return res.status(503).json({
+        ok: false,
+        recordingId,
+        status: recording.status,
+        error: dispatch.reason,
+      });
+    }
+
+    const { EgressClient } = await import('livekit-server-sdk');
+    const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
+    const info = await egress.startRoomCompositeEgress(meeting.code, {
+      file: {
+        filepath: storage.objectKeyFor(recording),
+        s3: {
+          accessKey: process.env.RECORDING_STORAGE_ACCESS_KEY,
+          secret: process.env.RECORDING_STORAGE_SECRET,
+          region: process.env.RECORDING_STORAGE_REGION,
+          bucket: storage.bucket,
+        },
+      },
+    });
+
+    await supabaseAdmin.from('meeting_recordings').update({
+      status: 'active',
+      egress_id: String(info?.egressId ?? info?.egress_id ?? ''),
+      storage_provider: storage.provider,
+      storage_key: storage.objectKeyFor(recording),
+      started_at: new Date().toISOString(),
+    }).eq('id', recording.id);
+
+    return res.json({ ok: true, recordingId, status: 'active' });
+  } catch (error) {
+    console.error('Failed to start recording egress', error);
+    await supabaseAdmin?.from('meeting_recordings').update({
+      status: 'failed',
+      error: 'LiveKit egress could not be started.',
+    }).eq('id', req.body?.recordingId);
+    return res.status(502).json({ error: 'LiveKit egress could not be started.' });
+  }
+});
+
+async function dispatchDueNotificationJobs() {
+  if (!supabaseAdmin) return;
+  const { data: jobs, error } = await supabaseAdmin
+    .from('meeting_notification_jobs')
+    .select('id, meeting_id, invite_id, organization_id, workspace_id, channel, template, status, recipient, scheduled_for, next_attempt_at, attempt_count')
+    .eq('status', 'pending')
+    .lte('scheduled_for', new Date().toISOString())
+    .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
+    .limit(20);
+  if (error || !jobs?.length) return;
+
+  for (const job of jobs) {
+    const result = await dispatchNotificationJob(job, {
+      async deliverInApp(current) {
+        const { data: user } = await supabaseAdmin
+          .from('users')
+          .select('id')
+          .eq('email', current.recipient)
+          .maybeSingle();
+        if (!user) {
+          return { delivered: false, skipped: true, reason: 'Recipient does not have an account yet.' };
+        }
+        const { error: insertError } = await supabaseAdmin.from('in_app_notifications').insert({
+          organization_id: current.organization_id,
+          user_id: user.id,
+          title: current.template === 'meeting_invitation' ? 'Meeting invitation' : 'Meeting reminder',
+          body: `A ${String(current.template).replace(/_/g, ' ')} is waiting in LeTsMeet.`,
+          meeting_id: current.meeting_id,
+        });
+        if (insertError) return { delivered: false, skipped: false, reason: insertError.message };
+        await supabaseAdmin.from('meeting_notification_jobs').update({
+          status: 'sent',
+          sent_at: new Date().toISOString(),
+          provider: 'in_app',
+        }).eq('id', current.id);
+        return { delivered: true, skipped: false };
+      },
+    });
+    if (!result.delivered && !result.skipped) {
+      await supabaseAdmin.from('meeting_notification_jobs').update({
+        attempt_count: (job.attempt_count ?? 0) + 1,
+        last_error: String(result.reason ?? 'Delivery failed').slice(0, 500),
+        status: 'pending',
+      }).eq('id', job.id);
+    }
+  }
+}
+
 app.listen(port, () => {
   console.log(`LiveKit token endpoint listening on http://localhost:${port}`);
+  setInterval(() => {
+    void dispatchDueNotificationJobs();
+  }, 60_000);
 });

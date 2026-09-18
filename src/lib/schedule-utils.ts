@@ -133,7 +133,13 @@ export function canManageScheduledMeeting(input: {
   return input.userId === input.hostId || Boolean(input.isOrgAdmin);
 }
 
+export function reminderScheduleForMeeting(scheduledFor: Date, intervalsMinutes = [24 * 60, 60, 15], now = new Date()) {
+  return intervalsMinutes
+    .map((minutes) => new Date(scheduledFor.getTime() - minutes * 60 * 1000))
+    .filter((when) => when.getTime() > now.getTime());
+}
+
 export function reminderTimeForMeeting(scheduledFor: Date, now = new Date()): Date {
-  const reminder = new Date(scheduledFor.getTime() - 15 * 60 * 1000);
-  return reminder.getTime() > now.getTime() ? reminder : now;
+  const upcoming = reminderScheduleForMeeting(scheduledFor, [15], now);
+  return upcoming[0] ?? now;
 }

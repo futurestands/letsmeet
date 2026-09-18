@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ClipboardList,
   Camera,
   CameraOff,
   ChevronDown,
@@ -29,8 +30,14 @@ import { ConnectionState, Room, RoomEvent, Track, VideoPresets } from 'livekit-c
 import type { User } from '../lib/supabase';
 import type { ChatMessage, JoinedMeeting, MeetingSummary } from '../lib/data-access';
 import {
+  clearRaisedHands,
+  deletePersistentChat,
   listChatMessages,
+  listRaisedHands,
+  markChatRead,
+  sendMeetingReaction,
   sendPersistentChat,
+  setHandRaised as persistHandRaised,
   setPersistentMeetingLock,
 } from '../lib/data-access';
 import {
@@ -53,6 +60,7 @@ import {
 import { supabase } from '../lib/supabase';
 import { useMediaDevices } from '../hooks/useMediaDevices';
 import MeetingSidePanel, { type MeetingPanel } from './MeetingSidePanel';
+import MeetingToolsPanel from './MeetingToolsPanel';
 import ParticipantGrid from './ParticipantGrid';
 
 type ConferenceRoomProps = {
@@ -104,6 +112,7 @@ function ConferenceExperience({
   } = useLocalParticipant();
   const devices = useMediaDevices();
   const [panel, setPanel] = useState<MeetingPanel>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [raisedHands, setRaisedHands] = useState<Set<string>>(new Set());
   const [handRaised, setHandRaised] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -125,7 +134,11 @@ function ConferenceExperience({
   const selectPanel = (next: MeetingPanel) => {
     panelRef.current = next;
     setPanel(next);
-    if (next === 'chat') setUnread(0);
+    setToolsOpen(false);
+    if (next === 'chat') {
+      setUnread(0);
+      void markChatRead(meeting.id).catch(() => undefined);
+    }
   };
 
   const refreshMessages = useCallback(async () => {
@@ -165,7 +178,29 @@ function ConferenceExperience({
 
   useEffect(() => {
     void listChatMessages(meeting.id).then(setMessages).catch(() => setChatError('Chat history could not be loaded.'));
-  }, [meeting.id]);
+    void listRaisedHands(meeting.id).then((rows) => {
+      setRaisedHands(new Set(rows.map((row) => row.user_id)));
+      setHandRaised(rows.some((row) => row.user_id === user.id));
+    }).catch(() => undefined);
+  }, [meeting.id, user.id]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel(`conference-data:${meeting.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `meeting_id=eq.${meeting.id}` }, () => {
+        void refreshMessages();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_hand_raises', filter: `meeting_id=eq.${meeting.id}` }, () => {
+        void listRaisedHands(meeting.id).then((rows) => {
+          setRaisedHands(new Set(rows.map((row) => row.user_id)));
+          setHandRaised(rows.some((row) => row.user_id === user.id));
+        });
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [meeting.id, refreshMessages, user.id]);
 
   useEffect(() => {
     if (connectionState === ConnectionState.Connected && settings.audioOutputDeviceId) {
@@ -242,7 +277,12 @@ function ConferenceExperience({
     const raised = !handRaised;
     setHandRaised(raised);
     setRaisedHands((current) => updateRaisedHands(current, user.id, raised));
-    await sendEvent(encodeConferenceEvent({ type: 'hand', raised }), { reliable: true });
+    try {
+      await persistHandRaised(meeting.id, raised);
+      await sendEvent(encodeConferenceEvent({ type: 'hand', raised }), { reliable: true });
+    } catch {
+      setActionError('Your hand state could not be saved.');
+    }
   };
 
   const sendReaction = async (emoji: string, eventTimestamp: number) => {
@@ -251,7 +291,12 @@ function ConferenceExperience({
     reactionNonce.current += 1;
     const nonce = `${Math.floor(eventTimestamp)}-${reactionNonce.current}`;
     addReaction(user.id, emoji, `${user.id}-${nonce}`);
-    await sendEvent(encodeConferenceEvent({ type: 'reaction', emoji, nonce }), { reliable: false });
+    try {
+      await sendMeetingReaction(meeting.id, emoji);
+      await sendEvent(encodeConferenceEvent({ type: 'reaction', emoji, nonce }), { reliable: false });
+    } catch {
+      setActionError('The reaction could not be saved.');
+    }
     setShowReactions(false);
   };
 
@@ -360,7 +405,20 @@ function ConferenceExperience({
           onClose={() => selectPanel(null)}
           onSend={(message) => void sendChat(message)}
           onModerate={isHost ? (identity, action) => void moderate(identity, action) : undefined}
+          onDeleteMessage={(messageId) => {
+            void deletePersistentChat(messageId)
+              .then(() => setMessages((items) => items.filter((item) => item.id !== messageId)))
+              .catch(() => setChatError('The message could not be removed.'));
+          }}
+          onClearHands={isHost ? () => {
+            void clearRaisedHands(meeting.id)
+              .then(() => { setRaisedHands(new Set()); setHandRaised(false); })
+              .catch(() => setActionError('Raised hands could not be cleared.'));
+          } : undefined}
         />
+        {toolsOpen && (
+          <MeetingToolsPanel meetingId={meeting.id} isHost={isHost} tokenEndpoint={tokenEndpoint} />
+        )}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex items-end justify-center gap-3 px-4">
@@ -388,6 +446,18 @@ function ConferenceExperience({
         <button onClick={() => selectPanel(panel === 'chat' ? null : 'chat')} className={`meeting-control relative ${panel === 'chat' ? 'meeting-control-active' : ''}`} aria-label="Toggle meeting chat" title="Chat">
           <MessageSquare />
           {unread > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold">{Math.min(unread, 99)}</span>}
+        </button>
+        <button
+          onClick={() => {
+            setPanel(null);
+            panelRef.current = null;
+            setToolsOpen((value) => !value);
+          }}
+          className={`meeting-control ${toolsOpen ? 'meeting-control-active' : ''}`}
+          aria-label="Toggle collaboration tools"
+          title="Polls, Q&A, notes"
+        >
+          <ClipboardList />
         </button>
         <button onClick={() => void toggleHand()} className={`meeting-control ${handRaised ? 'meeting-control-active' : ''}`} aria-label={handRaised ? 'Lower hand' : 'Raise hand'} title={handRaised ? 'Lower hand' : 'Raise hand'}>
           <Hand />

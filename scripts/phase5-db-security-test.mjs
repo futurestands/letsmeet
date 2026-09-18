@@ -11,10 +11,10 @@ const psql = path.join(postgresBin, 'psql.exe');
 const pgIsReady = path.join(postgresBin, 'pg_isready.exe');
 const initdb = path.join(postgresBin, 'initdb.exe');
 const pgCtl = path.join(postgresBin, 'pg_ctl.exe');
-const port = '55435';
-const password = 'phase4test';
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'letsmeet-phase4-pg-'));
-const pwFile = path.join(os.tmpdir(), `letsmeet-phase4-pw-${process.pid}.txt`);
+const port = '55436';
+const password = 'phase5test';
+const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'letsmeet-phase5-pg-'));
+const pwFile = path.join(os.tmpdir(), `letsmeet-phase5-pw-${process.pid}.txt`);
 const databaseUrl = `postgresql://postgres:${password}@127.0.0.1:${port}/postgres`;
 
 function run(filePath) {
@@ -63,12 +63,14 @@ try {
     path.join(root, 'supabase', 'migrations', '006_supabase_pgcrypto_compatibility.sql'),
     path.join(root, 'supabase', 'migrations', '007_scheduling_invitations.sql'),
     path.join(root, 'supabase', 'migrations', '008_invite_acceptance_and_reminders.sql'),
-    path.join(__dirname, 'phase4-db-security-test.sql'),
+    path.join(root, 'supabase', 'migrations', '009_collaboration.sql'),
+    path.join(root, 'supabase', 'migrations', '010_recordings_ai_enterprise.sql'),
+    path.join(__dirname, 'phase5-db-security-test.sql'),
   ].forEach(run);
 
-  const summary = query("SELECT count(*)::text || ',' || count(*) FILTER (WHERE passed)::text || ',' || count(*) FILTER (WHERE NOT passed)::text FROM public.phase4_assertions;");
+  const summary = query("SELECT count(*)::text || ',' || count(*) FILTER (WHERE passed)::text || ',' || count(*) FILTER (WHERE NOT passed)::text FROM public.phase5_assertions;");
   const [total, passed, failed] = summary.split(',');
-  console.log(`Phase 4 database security assertions: ${passed}/${total} passed, ${failed} failed`);
+  console.log(`Phase 5/6 database security assertions: ${passed}/${total} passed, ${failed} failed`);
   if (Number(failed) > 0) process.exitCode = 1;
 } finally {
   if (started) spawnSync(pgCtl, ['-D', dataDir, '-m', 'fast', 'stop'], { stdio: 'ignore' });

@@ -18,6 +18,8 @@ type MeetingSidePanelProps = {
   onClose: () => void;
   onSend: (message: string) => void;
   onModerate?: (identity: string, action: 'mute' | 'remove') => void;
+  onDeleteMessage?: (messageId: string) => void;
+  onClearHands?: () => void;
 };
 
 export default function MeetingSidePanel({
@@ -32,6 +34,8 @@ export default function MeetingSidePanel({
   onClose,
   onSend,
   onModerate,
+  onDeleteMessage,
+  onClearHands,
 }: MeetingSidePanelProps) {
   const participants = useParticipants();
   const activeSpeakers = useSpeakingParticipants();
@@ -60,6 +64,13 @@ export default function MeetingSidePanel({
 
       {panel === 'participants' ? (
         <ul className="flex-1 space-y-2 overflow-y-auto p-4">
+          {canModerate && onClearHands && (
+            <li>
+              <button type="button" onClick={onClearHands} className="w-full rounded-xl border border-slate-700 px-3 py-2 text-left text-xs text-slate-300">
+                Clear raised hands
+              </button>
+            </li>
+          )}
           {participants.map((participant) => (
             <li key={participant.identity} className="flex items-center justify-between gap-2 rounded-xl bg-slate-800/70 px-3 py-3 text-sm text-slate-200">
               <span className="min-w-0">
@@ -117,6 +128,9 @@ export default function MeetingSidePanel({
                       <time dateTime={message.created_at}>{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
                     </div>
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm">{message.message}</p>
+                    {onDeleteMessage && (own || canModerate) && (
+                      <button type="button" onClick={() => onDeleteMessage(message.id)} className="mt-1 text-[11px] opacity-75">Remove</button>
+                    )}
                   </div>
                 </div>
               );

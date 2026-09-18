@@ -5,6 +5,7 @@ import {
   formatZonedDateTime,
   isValidInviteEmail,
   parseInviteEmails,
+  reminderScheduleForMeeting,
   reminderTimeForMeeting,
   wallTimeInTimeZoneToUtc,
 } from './schedule-utils';
@@ -42,9 +43,14 @@ describe('schedule utilities', () => {
     expect(formatDurationMinutes(60)).toBe('1 hour');
   });
 
-  it('schedules reminders without claiming they were delivered', () => {
+  it('schedules 24h, 1h, and 15m reminders without claiming they were delivered', () => {
     const meetingStart = new Date('2026-09-18T18:00:00.000Z');
     const now = new Date('2026-09-18T12:00:00.000Z');
     expect(reminderTimeForMeeting(meetingStart, now).toISOString()).toBe('2026-09-18T17:45:00.000Z');
+    expect(reminderScheduleForMeeting(meetingStart, [24 * 60, 60, 15], new Date('2026-09-16T12:00:00.000Z')).map((value) => value.toISOString())).toEqual([
+      '2026-09-17T18:00:00.000Z',
+      '2026-09-18T17:00:00.000Z',
+      '2026-09-18T17:45:00.000Z',
+    ]);
   });
 });

@@ -47,9 +47,8 @@ export function evaluateLiveKitAccess({
     return { ok: false, status: 403, error: 'This meeting is not available.' };
   }
 
-  if (!organizationMember || !workspaceMember) {
-    return { ok: false, status: 403, error: 'You do not have access to this meeting.' };
-  }
+  void organizationMember;
+  void workspaceMember;
 
   if (!participant || participant.user_id !== userId) {
     return { ok: false, status: 403, error: 'You do not have access to this meeting.' };
