@@ -19,6 +19,7 @@ const requiredMigrations = [
   '011_hardening_indexes_and_audit.sql',
   '012_collaboration_realtime_publication.sql',
   '013_meeting_reactions_realtime.sql',
+  '014_provider_queue_indexes.sql',
 ];
 const publicVariables = [
   'VITE_SUPABASE_URL',

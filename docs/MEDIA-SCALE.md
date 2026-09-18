@@ -2,54 +2,48 @@
 
 This document is an engineering assessment. It does **not** claim 500-participant support.
 
-## Current verified scale
+## Current verified capacity
 
-| Stage | Evidence |
-|---|---|
-| 2 concurrent browsers | Playwright dual-context staging conference gate |
-| Token API 10 concurrent | ~100% success when authenticated against a live meeting |
-| Token API 25 concurrent | Partial success; rate limiter begins returning 429 |
-| Token API 50–250 | Dominated by intentional 429 rate limiting |
+| Stage | Evidence | Status |
+|---|---|---|
+| 2 concurrent human browsers | Playwright dual-context staging conference gate | VERIFIED |
+| Token API warm path | Structured duration logs; typically ~1–2s including auth | PARTIALLY VERIFIED |
+| Token API 10 concurrent authenticated | Historical probe ~100% when not rate-limited | PARTIALLY VERIFIED |
+| Token API 25–250 concurrent | Multi-bucket limiter returns principled 429; see `docs/RATE-LIMIT.md` | VERIFIED (limiter) / NOT a media proof |
+| LiveKit media soak 10–250 | Not executed with LiveKit load agents in this pass | NOT TESTED |
+| 500 participants | No evidence | NOT SUPPORTED |
 
-## Target stages (aspirational)
+## Tested capacity
 
-| Participants | Frontend | SFU / LiveKit | API / DB | Primary risks |
-|---|---|---|---|---|
-| 10 | Full subscribe OK | Single room trivial | Negligible | None material |
-| 25 | Prefer pagination + dynacast | Still comfortable on LiveKit Cloud | Token bursts need limiter | Join storms |
-| 50 | Must paginate tiles; subscribe visible only | Simulcast + dynacast required | Auth/DB latency visible | Speaker + layout thrash |
-| 100 | Aggressive selective subscription | TURN + region placement matter | Rate limits + connection storms | Reconnect avalanches |
-| 250 | Stage + gallery pages only | Dedicated room capacity planning | Horizontal API needed | Bandwidth + CPU on clients |
-| 500 | Not claimed | Requires LiveKit load tooling + capacity plan | Not proven | Browser render + SFU cost |
+- Dual-browser media: 2
+- Token concurrency: policy-tested locally; staging soak numbers remain from prior probes under the old limiter
 
-## Architecture levers already present
+## Expected bottlenecks
 
-- LiveKit `adaptiveStream` / `dynacast` usage in conference connect paths
-- Participant tile pagination / selective subscription in `ParticipantGrid`
-- Stable tile ordering when active speaker changes (unit-tested)
-- Token endpoint authentication, CORS allowlist, and request rate limiting
+1. Browser DOM / video element count without pagination (mitigated: page size 16 + selective subscribe)
+2. Full remote track subscription (mitigated: unsubscribe off-page cameras; keep screen share subscribed)
+3. Token mint latency: Supabase `getUser` + meeting authorization queries (mitigated: parallel membership lookups)
+4. Render cold starts on free tiers
+5. Realtime fan-out for chat / polls / Q&A / notes
+6. SFU region, TURN, and uplink bandwidth (provider-dependent)
+7. Recording egress + object storage (PROVIDER REQUIRED)
 
-## Credible load-test strategy (media)
+## 500-participant requirements (not claimed)
 
-Do **not** spawn 500 full Chromium profiles.
+1. LiveKit-compatible load generator ramp: 10 → 25 → 50 → 100 → 250 → controlled 500
+2. Dedicated staging LiveKit capacity / region plan
+3. Horizontal token API + connection storm protection at the edge
+4. Gallery pagination + speaker/stage layout only (already foundational)
+5. Simulcast + dynacast + adaptiveStream enabled (already present in conference connect)
+6. Documented packet loss / CPU / memory budgets per stage
+7. Separate soak for Realtime collaboration channels
 
-Preferred approach:
+## Load-test strategy
 
-1. Use LiveKit-compatible load generators / CLI agents publishing muted tracks
-2. Ramp rooms: 10 → 25 → 50 → 100 → 250
-3. Measure join latency, subscribe success, packet loss, SFU CPU, egress bandwidth
-4. Separately soak token API with authenticated tokens and document 429 policy
-5. Only after 250 is stable, attempt controlled 500 in a dedicated staging project
+Prefer LiveKit CLI / server SDK agents publishing muted tracks over 500 GUI browsers.
 
-## Bottlenecks to watch
-
-- Browser DOM/video element count
-- Full-mesh subscription mistakes (mitigated by selective subscribe)
-- Token mint latency (Supabase auth + meeting authorization queries)
-- Render free-tier cold starts
-- Realtime channel fan-out for chat/collab tables
-- Recording egress and object storage throughput (provider-dependent)
+Harness notes live in `scripts/media-scale-harness.md` (procedure) — execution requires LiveKit admin credentials and is **NOT TESTED** until operators run it.
 
 ## Decision
 
-Until staged LiveKit media soaks produce evidence at 100+, treat marketing claims of large meetings as **unsupported**.
+Until staged LiveKit media soaks produce evidence at 100+, treat large-meeting marketing claims as **unsupported**.

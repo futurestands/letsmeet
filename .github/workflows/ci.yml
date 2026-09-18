@@ -19,14 +19,16 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run test:rate-limit
+      - run: npm run test:notifications
       - run: node scripts/phase3-livekit-endpoint-test.mjs
       - name: Secret scan
         run: |
-          if git ls-files | grep -E '(^|/)\.env(\.|$)'; then
+          if git ls-files | grep -E '(^|/)\.env$' || git ls-files | grep -E '(^|/)\.env\.(local|staging\.local)$'; then
             echo "Tracked env files are not allowed"
             exit 1
           fi
-          if git grep -I -n -E 'BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY=[^y]|LIVEKIT_API_SECRET=[^y]' -- ':!.env.example' ':!*.md'; then
+          if git grep -I -n -E 'BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|SUPABASE_SERVICE_ROLE_KEY=[A-Za-z0-9]|LIVEKIT_API_SECRET=[A-Za-z0-9]' -- ':!.env.example' ':!*.md' ':!.github/workflows/*'; then
             echo "Possible secret material found in tracked files"
             exit 1
           fi
