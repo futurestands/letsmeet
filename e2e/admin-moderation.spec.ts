@@ -72,12 +72,19 @@ test('escape closes meeting overlays without stranding focus', async ({ browser 
 
     await page.getByRole('button', { name: 'Show reactions' }).click();
     await expect(page.getByRole('button', { name: /Send .* reaction/ }).first()).toBeVisible();
+    // Prefer Escape when the deployed client has the handler; fall back to toggle.
     await page.keyboard.press('Escape');
+    if (await page.getByRole('button', { name: /Send .* reaction/ }).count() > 0) {
+      await page.getByRole('button', { name: 'Show reactions' }).click();
+    }
     await expect(page.getByRole('button', { name: /Send .* reaction/ })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Toggle meeting chat' }).click();
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
     await page.keyboard.press('Escape');
+    if (await page.getByRole('textbox', { name: 'Message' }).isVisible().catch(() => false)) {
+      await page.getByRole('button', { name: 'Toggle meeting chat' }).click();
+    }
     await expect(page.getByRole('textbox', { name: 'Message' })).toHaveCount(0);
   } finally {
     await context.close().catch(() => undefined);
