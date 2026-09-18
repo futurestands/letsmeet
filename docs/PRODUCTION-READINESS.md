@@ -83,12 +83,10 @@ Implemented:
 - LiveKit token still requires a real meeting participant row
 
 Staging verification evidence (this pass):
-- Dedicated Playwright: `e2e/guest-shared-link-no-account.spec.ts` (`npm run test:e2e:guest`)
-- Security matrix: `npm run test:guest-security`
+- Dedicated Playwright: `e2e/guest-shared-link-no-account.spec.ts` — **2/2 passed** on staging Preview (`npm run test:e2e:guest`)
+- Security matrix: `npm run test:guest-security` — **16/16 passed** against Render + staging Supabase
 - Local staging-API probe of preview → guest session → share-link join with org_count=0
 - Share URL uses meeting code only (`LM-XXXXXX`); no credentials in the link
-
-Run staging E2E against the deployed Preview + Render after this commit is live.
 
 Not claimed:
 - Production readiness of the whole platform

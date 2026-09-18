@@ -219,7 +219,7 @@ async function main() {
         },
         body: JSON.stringify({
           room: liveMeeting.code,
-          identity: host.userId,
+          targetIdentity: host.userId,
           action: 'remove',
         }),
       });
