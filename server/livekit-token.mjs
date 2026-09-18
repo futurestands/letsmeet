@@ -3,14 +3,18 @@ import dotenv from 'dotenv';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
 import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
-import { dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
-import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, aiProviderConfigured, transcriptionProviderConfigured } from './recordings.mjs';
+import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
+import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload } from './recordings.mjs';
+import { aiStatusPayload, executeAiJob } from './ai.mjs';
+import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
+import { createRateLimiter } from './rate-limit.mjs';
 
 dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((item) => item.trim()).filter(Boolean);
+const tokenRateLimiter = createRateLimiter();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,17 +27,17 @@ const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
 
 app.use(express.json({ limit: '32kb' }));
 
-const rateBuckets = new Map();
-function allowRequest(key, limit, windowMs) {
-  const now = Date.now();
-  const next = (rateBuckets.get(key) ?? []).filter((stamp) => now - stamp < windowMs);
-  if (next.length >= limit) {
-    rateBuckets.set(key, next);
-    return false;
-  }
-  next.push(now);
-  rateBuckets.set(key, next);
-  return true;
+function requestId() {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logEvent(level, event, fields = {}) {
+  console.log(JSON.stringify({
+    ts: new Date().toISOString(),
+    level,
+    event,
+    ...fields,
+  }));
 }
 
 app.get('/health', (_req, res) => {
@@ -41,13 +45,22 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/ready', (_req, res) => {
-  const ready = Boolean(supabaseAdmin && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
-  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready' });
+  const dependencies = {
+    supabaseAdmin: Boolean(supabaseAdmin),
+    livekit: Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && livekitHost),
+  };
+  const ready = dependencies.supabaseAdmin && dependencies.livekit;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    dependencies,
+  });
 });
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const allowOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  req.requestId = requestId();
+  res.setHeader('X-Request-Id', req.requestId);
 
   if (origin && !allowedOrigins.includes(origin)) {
     return res.status(403).json({ error: 'Origin not allowed.' });
@@ -72,17 +85,21 @@ app.get('/api/notifications/status', (_req, res) => {
 app.get('/api/recordings/status', (_req, res) => {
   res.json({
     ...recordingStatusPayload(),
-    transcriptionConfigured: transcriptionProviderConfigured(),
-    aiConfigured: aiProviderConfigured(),
+    transcription: transcriptionStatusPayload(),
+    ai: aiStatusPayload(),
   });
 });
 
-app.get('/api/livekit/token', async (req, res) => {
-  const clientKey = `${req.ip}:${req.headers.authorization || 'anon'}`;
-  if (!allowRequest(`token:${clientKey}`, 30, 60_000)) {
-    return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
-  }
+app.get('/api/ai/status', (_req, res) => {
+  res.json(aiStatusPayload());
+});
 
+app.get('/api/transcription/status', (_req, res) => {
+  res.json(transcriptionStatusPayload());
+});
+
+app.get('/api/livekit/token', async (req, res) => {
+  const started = Date.now();
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const room = normalizeRoomCode(req.query.room);
@@ -96,6 +113,13 @@ app.get('/api/livekit/token', async (req, res) => {
   }
 
   if (!authToken || !supabaseAdmin || !supabaseUrl) {
+    const anonDecision = tokenRateLimiter.evaluateTokenRequest({
+      ip: req.ip,
+      authenticated: false,
+    });
+    if (!anonDecision.ok) {
+      return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
+    }
     return res.status(401).json({ error: 'Authentication is required to join a meeting.' });
   }
 
@@ -104,6 +128,23 @@ app.get('/api/livekit/token', async (req, res) => {
 
     if (authError || !user) {
       return res.status(401).json({ error: 'Session is invalid or expired.' });
+    }
+
+    const rate = tokenRateLimiter.evaluateTokenRequest({
+      ip: req.ip,
+      userId: user.id,
+      room,
+      authenticated: true,
+    });
+    if (!rate.ok) {
+      logEvent('warn', 'token.rate_limited', {
+        requestId: req.requestId,
+        reason: rate.reason,
+        room,
+        userId: user.id,
+        durationMs: Date.now() - started,
+      });
+      return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
     }
 
     const { data: meeting, error: meetingError } = await supabaseAdmin
@@ -116,32 +157,32 @@ app.get('/api/livekit/token', async (req, res) => {
       return res.status(500).json({ error: 'Unable to resolve the meeting.' });
     }
 
-    const { data: participant } = meeting
-      ? await supabaseAdmin
+    const [participantResult, membershipResult, workspaceResult] = meeting
+      ? await Promise.all([
+        supabaseAdmin
           .from('meeting_participants')
           .select('id, meeting_id, user_id, organization_id, workspace_id, role, status')
           .eq('meeting_id', meeting.id)
           .eq('user_id', user.id)
-          .maybeSingle()
-      : { data: null };
-
-    const { data: membership } = meeting
-      ? await supabaseAdmin
+          .maybeSingle(),
+        supabaseAdmin
           .from('organization_members')
           .select('id, status')
           .eq('organization_id', meeting.organization_id)
           .eq('user_id', user.id)
           .eq('status', 'active')
-          .maybeSingle()
-      : { data: null };
-
-    const { data: workspace } = meeting
-      ? await supabaseAdmin
+          .maybeSingle(),
+        supabaseAdmin
           .from('workspaces')
           .select('id, organization_id')
           .eq('id', meeting.workspace_id)
-          .maybeSingle()
-      : { data: null };
+          .maybeSingle(),
+      ])
+      : [{ data: null }, { data: null }, { data: null }];
+
+    const participant = participantResult.data;
+    const membership = membershipResult.data;
+    const workspace = workspaceResult.data;
 
     const decision = evaluateLiveKitAccess({
       isAuthenticated: true,
@@ -160,6 +201,13 @@ app.get('/api/livekit/token', async (req, res) => {
     });
 
     if (!decision.ok) {
+      logEvent('info', 'token.denied', {
+        requestId: req.requestId,
+        room,
+        userId: user.id,
+        status: decision.status,
+        durationMs: Date.now() - started,
+      });
       return res.status(decision.status).json({ error: decision.error });
     }
 
@@ -178,9 +226,20 @@ app.get('/api/livekit/token', async (req, res) => {
     });
 
     const token = await at.toJwt();
+    logEvent('info', 'token.issued', {
+      requestId: req.requestId,
+      room: decision.room,
+      userId: user.id,
+      durationMs: Date.now() - started,
+    });
     return res.json({ token, room: decision.room, identity: decision.identity, name: decision.name });
   } catch (error) {
-    console.error('Failed to issue LiveKit token', error);
+    logEvent('error', 'token.failed', {
+      requestId: req.requestId,
+      room,
+      durationMs: Date.now() - started,
+      message: error instanceof Error ? error.message : 'unknown',
+    });
     return res.status(500).json({ error: 'Unable to issue a LiveKit token.' });
   }
 });
@@ -351,6 +410,8 @@ async function dispatchDueNotificationJobs() {
     if (!claimed) continue;
 
     const result = await dispatchNotificationJob(claimed, {
+      deliverEmail: deliverEmailViaConfiguredProvider,
+      deliverSms: deliverSmsViaConfiguredProvider,
       async deliverInApp(current) {
         const { data: user } = await supabaseAdmin
           .from('users')
@@ -358,7 +419,6 @@ async function dispatchDueNotificationJobs() {
           .eq('email', current.recipient)
           .maybeSingle();
         if (!user) {
-          await supabaseAdmin.rpc('release_notification_job', { p_job_id: current.id });
           return { delivered: false, skipped: true, reason: 'Recipient does not have an account yet.' };
         }
         const { error: insertError } = await supabaseAdmin.from('in_app_notifications').insert({
@@ -369,24 +429,26 @@ async function dispatchDueNotificationJobs() {
           meeting_id: current.meeting_id,
         });
         if (insertError) return { delivered: false, skipped: false, reason: insertError.message };
-        await supabaseAdmin.rpc('complete_notification_job', {
-          p_job_id: current.id,
-          p_provider: 'in_app',
-          p_provider_message_id: null,
-        });
-        return { delivered: true, skipped: false };
+        return { delivered: true, skipped: false, provider: 'in_app', providerMessageId: null };
       },
     });
 
-    if (result.delivered) continue;
+    if (result.delivered) {
+      await supabaseAdmin.rpc('complete_notification_job', {
+        p_job_id: claimed.id,
+        p_provider: result.provider ?? claimed.channel,
+        p_provider_message_id: result.providerMessageId ?? null,
+      });
+      continue;
+    }
     if (result.skipped) {
       // Leave email/SMS pending without claiming delivery. Release processing lock.
-      await supabaseAdmin.rpc('release_notification_job', { p_job_id: job.id });
+      await supabaseAdmin.rpc('release_notification_job', { p_job_id: claimed.id });
       continue;
     }
 
-    const attempts = (job.attempt_count ?? 0) + 1;
-    const maxAttempts = job.max_attempts ?? 5;
+    const attempts = (claimed.attempt_count ?? job.attempt_count ?? 0) + 1;
+    const maxAttempts = claimed.max_attempts ?? job.max_attempts ?? 5;
     await supabaseAdmin.from('meeting_notification_jobs').update({
       attempt_count: attempts,
       last_error: String(result.reason ?? 'Delivery failed').slice(0, 500),
@@ -394,13 +456,68 @@ async function dispatchDueNotificationJobs() {
       next_attempt_at: attempts >= maxAttempts
         ? null
         : new Date(Date.now() + (2 ** Math.max(attempts - 1, 0)) * 60_000).toISOString(),
+    }).eq('id', claimed.id);
+  }
+}
+
+async function processQueuedProviderJobs() {
+  if (!supabaseAdmin) return;
+
+  const { data: aiJobs } = await supabaseAdmin
+    .from('meeting_ai_jobs')
+    .select('id, meeting_id, organization_id, workspace_id, requested_by, job_type, prompt, status')
+    .eq('status', 'queued')
+    .limit(10);
+
+  for (const job of aiJobs ?? []) {
+    const result = await executeAiJob(job);
+    if (result.skipped) {
+      // Remain queued / PROVIDER_REQUIRED — never mark completed without a provider.
+      continue;
+    }
+    if (result.completed) {
+      await supabaseAdmin.from('meeting_ai_jobs').update({
+        status: 'completed',
+        result: result.result ?? {},
+        completed_at: new Date().toISOString(),
+      }).eq('id', job.id);
+      continue;
+    }
+    await supabaseAdmin.from('meeting_ai_jobs').update({
+      status: 'failed',
+      error: String(result.reason ?? 'AI provider failed').slice(0, 500),
+    }).eq('id', job.id);
+  }
+
+  const { data: transcriptJobs } = await supabaseAdmin
+    .from('meeting_transcripts')
+    .select('id, meeting_id, organization_id, workspace_id, status')
+    .eq('status', 'queued')
+    .limit(10);
+
+  for (const job of transcriptJobs ?? []) {
+    const result = await executeTranscriptionJob(job);
+    if (result.skipped) continue;
+    if (result.completed) {
+      await supabaseAdmin.from('meeting_transcripts').update({
+        status: 'completed',
+        updated_at: new Date().toISOString(),
+      }).eq('id', job.id);
+      continue;
+    }
+    await supabaseAdmin.from('meeting_transcripts').update({
+      status: 'failed',
+      error: String(result.reason ?? 'Transcription provider failed').slice(0, 500),
+      updated_at: new Date().toISOString(),
     }).eq('id', job.id);
   }
 }
 
 app.listen(port, () => {
+  logEvent('info', 'server.listen', { port });
   console.log(`LiveKit token endpoint listening on http://localhost:${port}`);
   setInterval(() => {
     void dispatchDueNotificationJobs();
+    void processQueuedProviderJobs();
   }, 60_000);
 });
