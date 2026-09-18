@@ -42,7 +42,7 @@ const ParticipantGrid = memo(function ParticipantGrid({
     [activeSpeakers],
   );
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
-  const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: false });
+  const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: true });
 
   const orderedTracks = useMemo(() => [...cameraTracks].sort((left, right) => compareParticipantTiles(
     {

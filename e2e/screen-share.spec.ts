@@ -39,8 +39,10 @@ test('host screen share start/stop is visible to remote participant when capture
     const presenting = participantPage.getByText(/is presenting/i);
     const stage = participantPage.locator('[data-screen-share-stage="true"]');
 
-    const shareStarted = await stopShare.or(presenting).or(stage).isVisible().catch(() => false);
-    if (!shareStarted) {
+    const hostStarted = await stopShare.isVisible().catch(() => false);
+    const remoteSees = (await presenting.isVisible().catch(() => false))
+      || (await stage.isVisible().catch(() => false));
+    if (!hostStarted && !remoteSees) {
       diagnostics.screenShare = 'unverified-automation-capture-source-limitation';
       assertNoSecretLeak(JSON.stringify(diagnostics));
       test.info().annotations.push({
@@ -50,12 +52,8 @@ test('host screen share start/stop is visible to remote participant when capture
       return;
     }
 
-    diagnostics.hostControl = (await stopShare.isVisible().catch(() => false)) ? 'stop-visible' : 'share-attempted';
-    if (await presenting.isVisible().catch(() => false) || await stage.isVisible().catch(() => false)) {
-      diagnostics.remoteVisibility = 'pass';
-    } else {
-      diagnostics.remoteVisibility = 'host-started-remote-unconfirmed';
-    }
+    diagnostics.hostControl = hostStarted ? 'stop-visible' : 'share-attempted';
+    diagnostics.remoteVisibility = remoteSees ? 'pass' : 'host-started-remote-unconfirmed';
 
     // Cameras/audio controls remain available during share.
     await expect(hostPage.getByRole('button', { name: /Mute microphone|Unmute microphone/ })).toBeVisible();

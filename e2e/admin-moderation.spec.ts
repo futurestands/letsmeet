@@ -27,13 +27,14 @@ test('host admin moderation: lock, mute, remove, end remain authoritative', asyn
 
     // Lock meeting from device menu
     await hostPage.getByRole('button', { name: 'Device settings' }).click();
-    await expect(hostPage.getByRole('dialog', { name: 'Device settings' })).toBeVisible();
+    await expect(hostPage.getByRole('button', { name: 'Lock meeting' })).toBeVisible({ timeout: 15_000 });
     await hostPage.getByRole('button', { name: 'Lock meeting' }).click();
     await expect(hostPage.getByLabel('Meeting locked')).toBeVisible({ timeout: 20_000 });
     diagnostics.lock = 'pass';
 
     // Unlock
     await hostPage.getByRole('button', { name: 'Device settings' }).click();
+    await expect(hostPage.getByRole('button', { name: 'Unlock meeting' })).toBeVisible({ timeout: 15_000 });
     await hostPage.getByRole('button', { name: 'Unlock meeting' }).click();
     await expect(hostPage.getByLabel('Meeting locked')).toHaveCount(0);
     diagnostics.unlock = 'pass';
@@ -84,14 +85,14 @@ test('escape closes meeting overlays without stranding focus', async ({ browser 
     await hostStartMeeting(page);
 
     await page.getByRole('button', { name: 'Show reactions' }).click();
-    await expect(page.getByRole('menu')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Send .* reaction/ }).first()).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Send .* reaction/ })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Device settings' }).click();
-    await expect(page.getByRole('dialog', { name: 'Device settings' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Lock meeting|Unlock meeting/ })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Device settings' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Lock meeting|Unlock meeting/ })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Toggle meeting chat' }).click();
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
