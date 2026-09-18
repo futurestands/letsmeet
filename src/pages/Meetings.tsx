@@ -16,9 +16,10 @@ import {
   isActiveMeetingStatus,
   isJoinableMeetingStatus,
   isPastMeetingStatus,
-  meetingJoinPath,
+  meetingDetailsPath,
   type MeetingHistoryFilter,
 } from '../lib/meeting-utils';
+import { detectUserTimeZone, formatZonedDateTime } from '../lib/schedule-utils';
 
 const filters: { id: MeetingHistoryFilter; label: string }[] = [
   { id: 'upcoming', label: 'Upcoming' },
@@ -124,15 +125,15 @@ export default function Meetings() {
                     {upcomingScheduled.map((item) => (
                       <button
                         key={item.id}
-                        onClick={() => item.meeting_code && isJoinableMeetingStatus(item.status)
-                          ? navigate(meetingJoinPath(item.meeting_code))
-                          : navigate(`/meetings/${item.id}`)}
+                        onClick={() => navigate(meetingDetailsPath(item.id))}
                         className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-blue-300"
                       >
                         <span>
                           <span className="flex items-center gap-2 text-xs uppercase tracking-[0.12em] text-slate-500">
                             <CalendarDays className="h-4 w-4" />
-                            {item.date} · {item.time} {item.timezone}
+                            {item.scheduled_for
+                              ? formatZonedDateTime(item.scheduled_for, detectUserTimeZone())
+                              : `${item.date} · ${item.time} ${item.timezone}`}
                           </span>
                           <strong className="mt-2 block text-lg text-slate-900">{item.title}</strong>
                           <span className="mt-1 block text-sm text-blue-700">{item.meeting_code}</span>

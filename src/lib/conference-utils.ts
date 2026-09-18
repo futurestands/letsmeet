@@ -125,3 +125,91 @@ export function updateRaisedHands(
   else next.delete(identity);
   return next;
 }
+
+export const LIVEKIT_TOKEN_TTL_SECONDS = 6 * 60 * 60;
+
+export type ConferenceDisconnectKind = 'network' | 'removed' | 'room-closed' | 'client';
+
+export type ParticipantTileOrderInput = {
+  identity: string;
+  isLocal: boolean;
+  name?: string | null;
+};
+
+export type AudioTrackDescriptor = {
+  participantId: string;
+  isMicrophone: boolean;
+  isAudible: boolean;
+};
+
+export function compareParticipantTiles(
+  left: ParticipantTileOrderInput,
+  right: ParticipantTileOrderInput,
+): number {
+  if (left.isLocal !== right.isLocal) return left.isLocal ? -1 : 1;
+  return (left.name || left.identity).localeCompare(right.name || right.identity);
+}
+
+export function isActiveSpeaker(identity: string, speakerIdentities: ReadonlySet<string>): boolean {
+  return speakerIdentities.has(identity);
+}
+
+export function describeAudioTrack(input: {
+  identity: string;
+  muted: boolean;
+  source?: string | null;
+}): AudioTrackDescriptor {
+  const source = String(input.source ?? 'microphone').toLowerCase();
+  return {
+    participantId: input.identity,
+    isMicrophone: source === 'microphone' || source === 'audio' || source === '',
+    isAudible: !input.muted,
+  };
+}
+
+export function classifyDisconnectReason(reason: unknown): ConferenceDisconnectKind {
+  const numeric = typeof reason === 'number' ? reason : Number.NaN;
+  const label = String(reason ?? '').toUpperCase();
+  if (numeric === 4 || label.includes('PARTICIPANT_REMOVED')) return 'removed';
+  if (numeric === 5 || numeric === 10 || label.includes('ROOM_DELETED') || label.includes('ROOM_CLOSED')) {
+    return 'room-closed';
+  }
+  if (numeric === 1 || label.includes('CLIENT_INITIATED')) return 'client';
+  return 'network';
+}
+
+export function shouldAttemptReconnect(kind: ConferenceDisconnectKind): boolean {
+  return kind === 'network';
+}
+
+export function shouldEndMeetingOnDisconnect(kind: ConferenceDisconnectKind): boolean {
+  void kind;
+  return false;
+}
+
+export function shouldLeaveMeetingOnDisconnect(kind: ConferenceDisconnectKind): boolean {
+  return kind === 'removed' || kind === 'client';
+}
+
+export function shouldShowConnectionBanner(state: ConferenceConnectionState): boolean {
+  return state === 'connecting'
+    || state === 'reconnecting'
+    || state === 'reconnected'
+    || state === 'disconnected'
+    || state === 'failed';
+}
+
+export function nextLiveKitTokenRefreshDelayMs(
+  issuedAtMs: number,
+  nowMs: number,
+  ttlSeconds = LIVEKIT_TOKEN_TTL_SECONDS,
+  leadSeconds = 30 * 60,
+): number {
+  const refreshAt = issuedAtMs + Math.max(60, ttlSeconds - leadSeconds) * 1000;
+  return Math.max(5_000, refreshAt - nowMs);
+}
+
+export function liveKitReconnectDelayMs(retryCount: number): number | null {
+  if (retryCount > 10) return null;
+  return Math.min(500 * (2 ** retryCount), 8_000);
+}

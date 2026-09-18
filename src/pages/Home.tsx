@@ -4,11 +4,15 @@ import { Video, Calendar, Users, Shield, Zap, MessageSquare, Monitor, Hand, Smil
 import { useAuth } from '../contexts/AuthContext';
 import { createPersistentMeeting, getUserOrganizationContext, listMeetingsForUser, listScheduledMeetingsForUser, type UserOrganizationContext } from '../lib/data-access';
 import { destinationForMeeting, meetingJoinPath, normalizeMeetingCode } from '../lib/meeting-utils';
+import { detectUserTimeZone, formatZonedDateTime } from '../lib/schedule-utils';
 
 interface ScheduledMeetingSummary {
+  id: string;
   title: string;
   date: string;
   time: string;
+  timezone: string;
+  scheduled_for?: string | null;
   meeting_code?: string | null;
 }
 
@@ -50,12 +54,17 @@ export default function Home() {
         setRecentMeetings(meetings.slice(0, 6));
 
         setScheduledMeetings(
-          rows.map((row) => ({
-            title: row.title,
-            date: row.date,
-            time: row.time,
-            meeting_code: row.meeting_code ?? undefined,
-          })),
+          rows
+            .filter((row) => row.status === 'scheduled' || row.status === 'waiting')
+            .map((row) => ({
+              id: row.id,
+              title: row.title,
+              date: row.date,
+              time: row.time,
+              timezone: row.timezone,
+              scheduled_for: row.scheduled_for,
+              meeting_code: row.meeting_code ?? undefined,
+            })),
         );
       } catch (error) {
         console.error('Failed to load scheduled meetings', error);
@@ -177,15 +186,18 @@ export default function Home() {
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {scheduledMeetings.map((meeting) => (
                   <button
-                    key={`${meeting.meeting_code ?? meeting.title}-${meeting.date}-${meeting.time}`}
+                    key={meeting.id}
                     onClick={() => meeting.meeting_code
                       ? navigate(meetingJoinPath(meeting.meeting_code))
                       : navigate('/meetings')}
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
                   >
-                    <p className="text-sm font-medium text-slate-500">{meeting.date}</p>
+                    <p className="text-sm font-medium text-slate-500">
+                      {meeting.scheduled_for
+                        ? formatZonedDateTime(meeting.scheduled_for, detectUserTimeZone())
+                        : `${meeting.date} · ${meeting.time} ${meeting.timezone}`}
+                    </p>
                     <h3 className="mt-2 text-lg font-semibold text-slate-900">{meeting.title}</h3>
-                    <p className="mt-1 text-sm text-slate-600">{meeting.time}</p>
                     <p className="mt-3 text-xs font-medium uppercase tracking-[0.12em] text-blue-700">{meeting.meeting_code ?? 'No code'}</p>
                   </button>
                 ))}

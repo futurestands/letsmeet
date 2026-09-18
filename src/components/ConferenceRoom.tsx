@@ -25,7 +25,7 @@ import {
   useLocalParticipant,
   useRoomContext,
 } from '@livekit/components-react';
-import { ConnectionState, Room, RoomEvent, VideoPresets } from 'livekit-client';
+import { ConnectionState, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import type { User } from '../lib/supabase';
 import type { ChatMessage, JoinedMeeting, MeetingSummary } from '../lib/data-access';
 import {
@@ -35,13 +35,19 @@ import {
 } from '../lib/data-access';
 import {
   connectionStatusMessage,
+  classifyDisconnectReason,
   decodeConferenceEvent,
   encodeConferenceEvent,
+  liveKitReconnectDelayMs,
   mediaErrorMessage,
   REACTIONS,
   shouldAllowReaction,
+  shouldAttemptReconnect,
+  shouldLeaveMeetingOnDisconnect,
+  shouldShowConnectionBanner,
   updateRaisedHands,
   type ConferenceConnectionState,
+  type ConferenceDisconnectKind,
   type PreJoinSettings,
 } from '../lib/conference-utils';
 import { supabase } from '../lib/supabase';
@@ -59,6 +65,8 @@ type ConferenceRoomProps = {
   onMeetingChange: (meeting: MeetingSummary) => void;
   onLeave: () => void;
   onEnd: () => void;
+  onForcedDisconnect?: (kind: ConferenceDisconnectKind) => void;
+  onRequestReconnect?: () => void;
 };
 
 type ReactionOverlay = {
@@ -83,6 +91,8 @@ function ConferenceExperience({
   onLeave,
   onEnd,
   mediaFailure,
+  onForcedDisconnect,
+  onRequestReconnect,
 }: Omit<ConferenceRoomProps, 'token' | 'serverUrl'> & { mediaFailure: string | null }) {
   const room = useRoomContext();
   const connectionState = useConnectionState();
@@ -106,6 +116,7 @@ function ConferenceExperience({
   const [sendingChat, setSendingChat] = useState(false);
   const [busyControl, setBusyControl] = useState<string | null>(null);
   const [connectionRestored, setConnectionRestored] = useState(false);
+  const [hostMuteNotice, setHostMuteNotice] = useState<string | null>(null);
   const lastReactionAt = useRef(0);
   const reactionNonce = useRef(0);
   const panelRef = useRef<MeetingPanel>(null);
@@ -168,19 +179,36 @@ function ConferenceExperience({
     let timer: number | undefined;
     const handleReconnected = () => {
       setConnectionRestored(true);
+      setActionError(null);
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => setConnectionRestored(false), 3000);
     };
+    const handleDisconnected = (reason?: unknown) => {
+      const kind = classifyDisconnectReason(reason);
+      if (shouldLeaveMeetingOnDisconnect(kind) || kind === 'room-closed') {
+        onForcedDisconnect?.(kind);
+      }
+    };
+    const handleTrackMuted = (publication: { source?: Track.Source }, participant?: { isLocal?: boolean }) => {
+      if (participant?.isLocal && publication.source === Track.Source.Microphone) {
+        setHostMuteNotice('Your microphone was muted.');
+      }
+    };
     room.on(RoomEvent.Reconnected, handleReconnected);
+    room.on(RoomEvent.Disconnected, handleDisconnected);
+    room.on(RoomEvent.TrackMuted, handleTrackMuted);
     return () => {
       room.off(RoomEvent.Reconnected, handleReconnected);
+      room.off(RoomEvent.Disconnected, handleDisconnected);
+      room.off(RoomEvent.TrackMuted, handleTrackMuted);
       if (timer) window.clearTimeout(timer);
     };
-  }, [room]);
+  }, [onForcedDisconnect, room]);
 
   const toggleMicrophone = async () => {
     try {
       setActionError(null);
+      setHostMuteNotice(null);
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, {
         deviceId: settings.audioDeviceId || undefined,
       });
@@ -295,16 +323,21 @@ function ConferenceExperience({
           <h1 className="truncate font-semibold">{meeting.title}</h1>
           <p className="text-xs text-slate-400">{meeting.code}</p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-300" aria-live="polite">
-          <span className={`h-2 w-2 rounded-full ${connection === 'connected' || connection === 'reconnected' ? 'bg-emerald-400' : connection === 'reconnecting' ? 'bg-amber-400' : 'bg-red-400'}`} />
-          <span className="hidden sm:inline">{connectionMessage}</span>
-          {meeting.is_locked && <Lock className="h-4 w-4 text-amber-300" aria-label="Meeting locked" />}
+        <div className="flex min-w-0 items-center gap-2 text-xs text-slate-300" aria-live="polite">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${connection === 'connected' || connection === 'reconnected' ? 'bg-emerald-400' : connection === 'reconnecting' ? 'bg-amber-400' : 'bg-red-400'}`} />
+          <span className="max-w-[9.5rem] truncate sm:max-w-none">{connectionMessage}</span>
+          {meeting.is_locked && <Lock className="h-4 w-4 shrink-0 text-amber-300" aria-label="Meeting locked" />}
         </div>
       </header>
 
-      {(actionError || mediaFailure || connection === 'reconnecting' || connection === 'disconnected' || connection === 'reconnected') && (
+      {(actionError || mediaFailure || hostMuteNotice || shouldShowConnectionBanner(connection)) && (
         <div className="shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 text-center text-sm text-amber-200" role="status">
-          {actionError || mediaFailure || connectionMessage}
+          <span>{actionError || mediaFailure || hostMuteNotice || connectionMessage}</span>
+          {connection === 'disconnected' && shouldAttemptReconnect(classifyDisconnectReason('network')) && onRequestReconnect && (
+            <button type="button" onClick={onRequestReconnect} className="ml-3 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+              Reconnect
+            </button>
+          )}
         </div>
       )}
 
@@ -323,8 +356,10 @@ function ConferenceExperience({
           raisedHands={raisedHands}
           sending={sendingChat}
           error={chatError}
+          moderatingIdentity={busyControl}
           onClose={() => selectPanel(null)}
           onSend={(message) => void sendChat(message)}
+          onModerate={isHost ? (identity, action) => void moderate(identity, action) : undefined}
         />
       </div>
 
@@ -337,7 +372,7 @@ function ConferenceExperience({
         ))}
       </div>
 
-      <footer className="relative z-40 flex shrink-0 items-center justify-start gap-2 overflow-x-auto border-t border-slate-800 bg-slate-950 px-2 py-3 sm:justify-center sm:gap-3 sm:px-6">
+      <footer className="relative z-40 flex shrink-0 items-center justify-start gap-2 overflow-x-auto border-t border-slate-800 bg-slate-950 px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-center sm:gap-3 sm:px-6">
         <button onClick={() => void toggleMicrophone()} className={`meeting-control ${isMicrophoneEnabled ? '' : 'meeting-control-off'}`} aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'} title={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'}>
           {isMicrophoneEnabled ? <Mic /> : <MicOff />}
         </button>
@@ -363,7 +398,7 @@ function ConferenceExperience({
             <Smile />
           </button>
           {showReactions && (
-            <div className="absolute bottom-16 left-1/2 flex -translate-x-1/2 gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
+            <div className="absolute bottom-16 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
               {REACTIONS.map((emoji) => (
                 <button key={emoji} onClick={(event) => void sendReaction(emoji, event.timeStamp)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
               ))}
@@ -376,7 +411,7 @@ function ConferenceExperience({
             <MoreHorizontal />
           </button>
           {showDevices && (
-            <div className="absolute bottom-16 right-0 w-72 space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
+            <div className="absolute bottom-16 right-0 z-50 w-[min(18rem,calc(100vw-1.5rem))] space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
               {[
                 { label: 'Microphone', kind: 'audioinput' as const, items: devices.microphones },
                 { label: 'Camera', kind: 'videoinput' as const, items: devices.cameras },
@@ -425,11 +460,17 @@ export default function ConferenceRoom({
   onMeetingChange,
   onLeave,
   onEnd,
+  onForcedDisconnect,
+  onRequestReconnect,
 }: ConferenceRoomProps) {
   const [mediaFailure, setMediaFailure] = useState<string | null>(null);
   const room = useMemo(() => new Room({
     adaptiveStream: true,
     dynacast: true,
+    disconnectOnPageLeave: true,
+    reconnectPolicy: {
+      nextRetryDelayInMs: (context) => liveKitReconnectDelayMs(context.retryCount),
+    },
     publishDefaults: {
       simulcast: true,
       videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
@@ -444,7 +485,7 @@ export default function ConferenceRoom({
       connect
       audio={settings.audioEnabled ? { deviceId: settings.audioDeviceId || undefined } : false}
       video={settings.videoEnabled ? { deviceId: settings.videoDeviceId || undefined, resolution: VideoPresets.h720.resolution } : false}
-      connectOptions={{ autoSubscribe: true }}
+      connectOptions={{ autoSubscribe: true, maxRetries: 10 }}
       onMediaDeviceFailure={(_, kind) => {
         setMediaFailure(`${kind === 'videoinput' ? 'Camera' : 'Microphone'} access failed. Check the selected device and browser permissions.`);
       }}
@@ -458,6 +499,8 @@ export default function ConferenceRoom({
         onMeetingChange={onMeetingChange}
         onLeave={onLeave}
         onEnd={onEnd}
+        onForcedDisconnect={onForcedDisconnect}
+        onRequestReconnect={onRequestReconnect}
         mediaFailure={mediaFailure}
       />
     </LiveKitRoom>

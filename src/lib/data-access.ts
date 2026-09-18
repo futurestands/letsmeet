@@ -17,6 +17,8 @@ export type MeetingSummary = {
   workspace_id: string;
   is_locked?: boolean;
   locked_at?: string | null;
+  description?: string | null;
+  duration_minutes?: number | null;
 };
 
 export type ScheduledMeetingSummary = {
@@ -32,6 +34,8 @@ export type ScheduledMeetingSummary = {
   status: MeetingStatus;
   organization_id: string;
   workspace_id: string;
+  description?: string | null;
+  duration_minutes?: number | null;
 };
 
 export type ParticipantSummary = {
@@ -71,8 +75,18 @@ export type ChatMessage = {
   created_at: string;
 };
 
-const meetingSelect = 'id, code, title, host_id, status, created_at, scheduled_for, started_at, ended_at, organization_id, workspace_id, is_locked, locked_at';
-const scheduledMeetingSelect = 'id, title, date, time, timezone, host_id, meeting_code, created_at, scheduled_for, status, organization_id, workspace_id';
+export type MeetingInvite = {
+  id: string;
+  meeting_id: string;
+  email: string;
+  status: 'pending' | 'accepted' | 'declined' | 'revoked';
+  invited_user_id?: string | null;
+  invited_by?: string | null;
+  created_at?: string | null;
+};
+
+const meetingSelect = 'id, code, title, host_id, status, created_at, scheduled_for, started_at, ended_at, organization_id, workspace_id, is_locked, locked_at, description, duration_minutes';
+const scheduledMeetingSelect = 'id, title, date, time, timezone, host_id, meeting_code, created_at, scheduled_for, status, organization_id, workspace_id, description, duration_minutes';
 const participantSelect = 'id, meeting_id, user_id, user_name, role, status, joined_at, left_at';
 
 function asMeetingSummary(row: MeetingSummary | null): MeetingSummary | null {
@@ -231,6 +245,8 @@ export async function schedulePersistentMeeting(input: {
   time: string;
   timezone: string;
   workspaceId?: string | null;
+  description?: string | null;
+  durationMinutes?: number;
 }): Promise<ScheduledMeetingSummary> {
   const { data, error } = await supabase.rpc('schedule_persistent_meeting', {
     p_title: input.title,
@@ -238,9 +254,58 @@ export async function schedulePersistentMeeting(input: {
     p_time: input.time,
     p_timezone: input.timezone,
     p_workspace_id: input.workspaceId ?? null,
+    p_description: input.description ?? null,
+    p_duration_minutes: input.durationMinutes ?? 30,
   });
   if (error) throw error;
   return data as ScheduledMeetingSummary;
+}
+
+export async function updateScheduledMeeting(input: {
+  meetingId: string;
+  title: string;
+  date: string;
+  time: string;
+  timezone: string;
+  description?: string | null;
+  durationMinutes?: number;
+}): Promise<MeetingSummary> {
+  const { data, error } = await supabase.rpc('update_scheduled_meeting', {
+    p_meeting_id: input.meetingId,
+    p_title: input.title,
+    p_date: input.date,
+    p_time: input.time,
+    p_timezone: input.timezone,
+    p_description: input.description ?? null,
+    p_duration_minutes: input.durationMinutes ?? 30,
+  });
+  if (error) throw error;
+  return data as MeetingSummary;
+}
+
+export async function listInvitesForMeeting(meetingId: string): Promise<MeetingInvite[]> {
+  const { data, error } = await supabase
+    .from('meeting_invites')
+    .select('id, meeting_id, email, status, invited_user_id, invited_by, created_at')
+    .eq('meeting_id', meetingId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as MeetingInvite[];
+}
+
+export async function inviteToPersistentMeeting(meetingId: string, email: string): Promise<MeetingInvite> {
+  const { data, error } = await supabase.rpc('invite_to_persistent_meeting', {
+    p_meeting_id: meetingId,
+    p_email: email,
+  });
+  if (error) throw error;
+  return data as MeetingInvite;
+}
+
+export async function revokeMeetingInvite(inviteId: string): Promise<MeetingInvite> {
+  const { data, error } = await supabase.rpc('revoke_meeting_invite', { p_invite_id: inviteId });
+  if (error) throw error;
+  return data as MeetingInvite;
 }
 
 function mapJoinedMeeting(row: Record<string, string>): JoinedMeeting {

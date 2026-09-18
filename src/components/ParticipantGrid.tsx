@@ -2,7 +2,12 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Crown, Hand, MicOff, UserMinus } from 'lucide-react';
 import { ParticipantTile, useSpeakingParticipants, useTracks } from '@livekit/components-react';
 import { RemoteTrackPublication, Track } from 'livekit-client';
-import { clampParticipantPage, visibleParticipantRange } from '../lib/conference-utils';
+import {
+  clampParticipantPage,
+  compareParticipantTiles,
+  isActiveSpeaker,
+  visibleParticipantRange,
+} from '../lib/conference-utils';
 
 type ParticipantGridProps = {
   hostId: string;
@@ -26,18 +31,17 @@ const ParticipantGrid = memo(function ParticipantGrid({
 }: ParticipantGridProps) {
   const [page, setPage] = useState(0);
   const activeSpeakers = useSpeakingParticipants();
-  const dominantIdentity = activeSpeakers[0]?.identity;
+  const speakerIdentities = useMemo(
+    () => new Set(activeSpeakers.map((participant) => participant.identity)),
+    [activeSpeakers],
+  );
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
   const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: true });
 
-  const orderedTracks = useMemo(() => [...cameraTracks].sort((left, right) => {
-    if (left.participant.identity === dominantIdentity) return -1;
-    if (right.participant.identity === dominantIdentity) return 1;
-    if (left.participant.isLocal) return -1;
-    if (right.participant.isLocal) return 1;
-    return (left.participant.name || left.participant.identity)
-      .localeCompare(right.participant.name || right.participant.identity);
-  }), [cameraTracks, dominantIdentity]);
+  const orderedTracks = useMemo(() => [...cameraTracks].sort((left, right) => compareParticipantTiles(
+    { identity: left.participant.identity, isLocal: left.participant.isLocal, name: left.participant.name },
+    { identity: right.participant.identity, isLocal: right.participant.isLocal, name: right.participant.name },
+  )), [cameraTracks]);
 
   const safePage = clampParticipantPage(page, orderedTracks.length);
   const range = visibleParticipantRange(safePage, orderedTracks.length);
@@ -75,15 +79,19 @@ const ParticipantGrid = memo(function ParticipantGrid({
           const identity = participant.identity;
           const isHost = identity === hostId;
           const handRaised = raisedHands.has(identity);
+          const speaking = isActiveSpeaker(identity, speakerIdentities);
+          const microphoneMuted = !participant.isMicrophoneEnabled;
           return (
             <div
               key={`${identity}-${trackRef.source}`}
               className={`group relative min-h-40 overflow-hidden rounded-2xl border bg-slate-900 ${
-                identity === dominantIdentity ? 'border-emerald-400 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]' : 'border-slate-800'
+                speaking ? 'border-emerald-400 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]' : 'border-slate-800'
               }`}
+              data-active-speaker={speaking ? 'true' : 'false'}
+              data-participant-identity={identity}
             >
               <ParticipantTile trackRef={trackRef} className="h-full w-full" />
-              <div className="pointer-events-none absolute left-3 top-3 flex gap-2">
+              <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-2">
                 {isHost && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/90 px-2 py-1 text-[11px] font-bold text-slate-950">
                     <Crown className="h-3 w-3" /> Host
@@ -92,6 +100,16 @@ const ParticipantGrid = memo(function ParticipantGrid({
                 {handRaised && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-blue-500 px-2 py-1 text-[11px] font-bold text-white">
                     <Hand className="h-3 w-3" /> Raised
+                  </span>
+                )}
+                {speaking && (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500 px-2 py-1 text-[11px] font-bold text-slate-950">
+                    Speaking
+                  </span>
+                )}
+                {microphoneMuted && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-950/85 px-2 py-1 text-[11px] font-bold text-white">
+                    <MicOff className="h-3 w-3" /> Muted
                   </span>
                 )}
               </div>

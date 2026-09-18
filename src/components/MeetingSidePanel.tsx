@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Crown, Hand, MessageSquare, Send, Users, X } from 'lucide-react';
-import { useParticipants } from '@livekit/components-react';
+import { Crown, Hand, MessageSquare, MicOff, Send, UserMinus, Users, X } from 'lucide-react';
+import { useParticipants, useSpeakingParticipants } from '@livekit/components-react';
 import type { ChatMessage } from '../lib/data-access';
+import { canUseHostControls, isActiveSpeaker } from '../lib/conference-utils';
 
 export type MeetingPanel = 'participants' | 'chat' | null;
 
@@ -13,8 +14,10 @@ type MeetingSidePanelProps = {
   raisedHands: ReadonlySet<string>;
   sending: boolean;
   error: string | null;
+  moderatingIdentity?: string | null;
   onClose: () => void;
   onSend: (message: string) => void;
+  onModerate?: (identity: string, action: 'mute' | 'remove') => void;
 };
 
 export default function MeetingSidePanel({
@@ -25,10 +28,15 @@ export default function MeetingSidePanel({
   raisedHands,
   sending,
   error,
+  moderatingIdentity,
   onClose,
   onSend,
+  onModerate,
 }: MeetingSidePanelProps) {
   const participants = useParticipants();
+  const activeSpeakers = useSpeakingParticipants();
+  const speakerIdentities = new Set(activeSpeakers.map((participant) => participant.identity));
+  const canModerate = canUseHostControls(hostId, currentUserId);
   const [draft, setDraft] = useState('');
   const messageEnd = useRef<HTMLDivElement | null>(null);
 
@@ -39,7 +47,7 @@ export default function MeetingSidePanel({
   if (!panel) return null;
 
   return (
-    <aside className="flex max-h-[45dvh] w-full shrink-0 flex-col border-l border-slate-800 bg-slate-900 md:max-h-none md:w-96" aria-label={panel === 'chat' ? 'Meeting chat' : 'Participants'}>
+    <aside className="flex max-h-[42dvh] w-full min-h-0 shrink-0 flex-col overflow-hidden border-t border-slate-800 bg-slate-900 md:max-h-none md:w-96 md:border-l md:border-t-0" aria-label={panel === 'chat' ? 'Meeting chat' : 'Participants'}>
       <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
         <h2 className="flex items-center gap-2 font-semibold text-white">
           {panel === 'chat' ? <MessageSquare className="h-5 w-5" /> : <Users className="h-5 w-5" />}
@@ -53,14 +61,40 @@ export default function MeetingSidePanel({
       {panel === 'participants' ? (
         <ul className="flex-1 space-y-2 overflow-y-auto p-4">
           {participants.map((participant) => (
-            <li key={participant.identity} className="flex items-center justify-between rounded-xl bg-slate-800/70 px-3 py-3 text-sm text-slate-200">
+            <li key={participant.identity} className="flex items-center justify-between gap-2 rounded-xl bg-slate-800/70 px-3 py-3 text-sm text-slate-200">
               <span className="min-w-0">
                 <strong className="block truncate font-medium">{participant.name || participant.identity}</strong>
-                <span className="text-xs text-slate-400">{participant.isLocal ? 'You' : 'In the meeting'}</span>
+                <span className="text-xs text-slate-400">
+                  {participant.isLocal ? 'You' : 'In the meeting'}
+                  {isActiveSpeaker(participant.identity, speakerIdentities) ? ' · Speaking' : ''}
+                  {!participant.isMicrophoneEnabled ? ' · Muted' : ''}
+                </span>
               </span>
-              <span className="flex items-center gap-2">
+              <span className="flex shrink-0 items-center gap-1">
                 {raisedHands.has(participant.identity) && <Hand className="h-4 w-4 text-blue-400" aria-label="Hand raised" />}
                 {participant.identity === hostId && <Crown className="h-4 w-4 text-amber-400" aria-label="Host" />}
+                {canModerate && onModerate && !participant.isLocal && participant.identity !== hostId && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onModerate(participant.identity, 'mute')}
+                      disabled={Boolean(moderatingIdentity)}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-40"
+                      aria-label={`Mute ${participant.name || participant.identity}`}
+                    >
+                      <MicOff className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onModerate(participant.identity, 'remove')}
+                      disabled={Boolean(moderatingIdentity)}
+                      className="flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-40"
+                      aria-label={`Remove ${participant.name || participant.identity}`}
+                    >
+                      <UserMinus className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
               </span>
             </li>
           ))}

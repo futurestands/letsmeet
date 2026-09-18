@@ -125,7 +125,7 @@ app.get('/api/livekit/token', async (req, res) => {
     const at = new AccessToken(apiKey, apiSecret, {
       identity: decision.identity,
       name: decision.name,
-      ttl: 60 * 5,
+      ttl: 60 * 60 * 6,
     });
 
     at.addGrant({

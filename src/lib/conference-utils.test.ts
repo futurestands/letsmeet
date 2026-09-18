@@ -2,12 +2,22 @@ import { describe, expect, it } from 'vitest';
 import {
   canUseHostControls,
   clampParticipantPage,
+  classifyDisconnectReason,
+  compareParticipantTiles,
   connectionStatusMessage,
   decodeConferenceEvent,
+  describeAudioTrack,
   encodeConferenceEvent,
+  isActiveSpeaker,
+  liveKitReconnectDelayMs,
+  nextLiveKitTokenRefreshDelayMs,
   participantPageCount,
   resolveSelectedDeviceId,
   shouldAllowReaction,
+  shouldAttemptReconnect,
+  shouldEndMeetingOnDisconnect,
+  shouldLeaveMeetingOnDisconnect,
+  shouldShowConnectionBanner,
   updateRaisedHands,
   visibleParticipantRange,
 } from './conference-utils';
@@ -64,4 +74,47 @@ describe('conference utilities', () => {
     expect(canUseHostControls('user-a', 'user-b')).toBe(false);
     expect(canUseHostControls('user-a', null)).toBe(false);
   });
+
+  it('keeps participant tile order stable when the active speaker changes', () => {
+    const tiles = [
+      { identity: 'user-b', isLocal: false, name: 'Bravo' },
+      { identity: 'user-a', isLocal: true, name: 'Alpha' },
+      { identity: 'user-c', isLocal: false, name: 'Charlie' },
+    ];
+    const first = [...tiles].sort(compareParticipantTiles).map((tile) => tile.identity);
+    const afterSpeakerChange = [...tiles].reverse().sort(compareParticipantTiles).map((tile) => tile.identity);
+    expect(first).toEqual(['user-a', 'user-b', 'user-c']);
+    expect(afterSpeakerChange).toEqual(first);
+    expect(isActiveSpeaker('user-c', new Set(['user-c']))).toBe(true);
+    expect(isActiveSpeaker('user-b', new Set(['user-c']))).toBe(false);
+    expect(visibleParticipantRange(1, 20)).toEqual({ start: 16, end: 20 });
+  });
+
+  it('associates mute state with the owning participant identity', () => {
+    expect(describeAudioTrack({ identity: 'user-b', muted: false, source: 'microphone' })).toEqual({
+      participantId: 'user-b',
+      isMicrophone: true,
+      isAudible: true,
+    });
+    expect(describeAudioTrack({ identity: 'user-b', muted: true, source: 'microphone' }).isAudible).toBe(false);
+  });
+
+  it('reconnects after a transient failure without ending the meeting', () => {
+    expect(classifyDisconnectReason(4)).toBe('removed');
+    expect(classifyDisconnectReason('PARTICIPANT_REMOVED')).toBe('removed');
+    expect(classifyDisconnectReason(1)).toBe('client');
+    expect(classifyDisconnectReason(9)).toBe('network');
+    expect(shouldAttemptReconnect('network')).toBe(true);
+    expect(shouldAttemptReconnect('removed')).toBe(false);
+    expect(shouldLeaveMeetingOnDisconnect('removed')).toBe(true);
+    expect(shouldLeaveMeetingOnDisconnect('network')).toBe(false);
+    expect(shouldEndMeetingOnDisconnect('network')).toBe(false);
+    expect(shouldEndMeetingOnDisconnect('removed')).toBe(false);
+    expect(shouldShowConnectionBanner('reconnecting')).toBe(true);
+    expect(shouldShowConnectionBanner('connected')).toBe(false);
+    expect(liveKitReconnectDelayMs(0)).toBe(500);
+    expect(liveKitReconnectDelayMs(11)).toBeNull();
+    expect(nextLiveKitTokenRefreshDelayMs(0, 0, 3600, 600)).toBe(3_000_000);
+  });
 });
+

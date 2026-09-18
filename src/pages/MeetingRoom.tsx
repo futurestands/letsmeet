@@ -36,6 +36,7 @@ export default function MeetingRoom() {
   const settings = (location.state as MeetingLocationState | null)?.preJoinSettings;
   const [meeting, setMeeting] = useState<JoinedMeeting | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [mediaSession, setMediaSession] = useState(0);
   const [pageError, setPageError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,6 +103,21 @@ export default function MeetingRoom() {
       void supabase.removeChannel(channel);
     };
   }, [persistentMeetingId, user?.id]);
+
+  const requestMediaToken = useCallback(async (remount = false) => {
+    if (!persistentMeetingCode || persistentMeetingStatus !== 'live' || !livekitTokenEndpoint) return;
+    setPageError(null);
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (!accessToken) throw new Error('Your session expired. Sign in again.');
+    const response = await fetch(`${livekitTokenEndpoint}?room=${encodeURIComponent(persistentMeetingCode)}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+    const payload = await response.json() as { token?: string; error?: string };
+    if (!response.ok || !payload.token) throw new Error(payload.error || 'Meeting authorization failed.');
+    setToken(payload.token);
+    if (remount) setMediaSession((value) => value + 1);
+  }, [livekitTokenEndpoint, persistentMeetingCode, persistentMeetingStatus]);
 
   useEffect(() => {
     if (!persistentMeetingCode || persistentMeetingStatus !== 'live' || !livekitTokenEndpoint) return undefined;
@@ -255,6 +271,7 @@ export default function MeetingRoom() {
 
   return (
     <ConferenceRoom
+      key={`${meeting.id}:${mediaSession}`}
       meeting={meeting}
       user={user!}
       token={token}
@@ -264,6 +281,21 @@ export default function MeetingRoom() {
       onMeetingChange={(next) => setMeeting((current) => current ? { ...current, ...next } : current)}
       onLeave={() => void leaveMeeting()}
       onEnd={() => void endMeeting()}
+      onForcedDisconnect={(kind) => {
+        if (kind === 'removed') {
+          setToken(null);
+          setPageError('The host removed you from this meeting.');
+          return;
+        }
+        if (kind === 'room-closed') {
+          setToken(null);
+        }
+      }}
+      onRequestReconnect={() => {
+        void requestMediaToken(true).catch((error) => {
+          setPageError(error instanceof Error ? error.message : 'Unable to reconnect to this meeting.');
+        });
+      }}
     />
   );
 }
