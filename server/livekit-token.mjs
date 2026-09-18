@@ -9,6 +9,7 @@ import { aiStatusPayload, executeAiJob } from './ai.mjs';
 import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
 import { createGuestSessionHandlers } from './guest-session.mjs';
+import { createTokenMetrics } from './token-metrics.mjs';
 
 dotenv.config();
 
@@ -16,6 +17,7 @@ const app = express();
 const port = Number(process.env.PORT || 3001);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((item) => item.trim()).filter(Boolean);
 const tokenRateLimiter = createRateLimiter();
+const tokenMetrics = createTokenMetrics();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -58,6 +60,14 @@ app.get('/ready', (_req, res) => {
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
     dependencies,
+  });
+});
+
+app.get('/api/livekit/metrics', (_req, res) => {
+  // Aggregate counters only — never tokens, JWTs, emails, or secrets.
+  res.json({
+    service: 'letsmeet-token-api',
+    ...tokenMetrics.snapshot(),
   });
 });
 
@@ -111,10 +121,16 @@ const guestHandlers = createGuestSessionHandlers({
 });
 
 app.get('/api/guest/meeting-preview', (req, res) => {
+  tokenMetrics.recordGuestPreview();
   void guestHandlers.previewMeeting(req, res);
 });
 
 app.post('/api/guest/session', (req, res) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    tokenMetrics.recordGuestSession(res.statusCode < 400);
+    return originalJson(body);
+  };
   void guestHandlers.createGuestSession(req, res);
 });
 
@@ -142,8 +158,10 @@ app.get('/api/livekit/token', async (req, res) => {
       authenticated: false,
     });
     if (!anonDecision.ok) {
+      tokenMetrics.recordTokenOutcome(429, { total_ms: Date.now() - started });
       return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
     }
+    tokenMetrics.recordTokenOutcome(401, { total_ms: Date.now() - started });
     return res.status(401).json({ error: 'Authentication is required to join a meeting.' });
   }
 
@@ -167,6 +185,7 @@ app.get('/api/livekit/token', async (req, res) => {
 
     const user = authResult.data?.user;
     if (authResult.error || !user) {
+      tokenMetrics.recordTokenOutcome(401, timing);
       return res.status(401).json({ error: 'Session is invalid or expired.' });
     }
 
@@ -179,6 +198,8 @@ app.get('/api/livekit/token', async (req, res) => {
     });
     timing.rate_limit_ms = Date.now() - rateStarted;
     if (!rate.ok) {
+      timing.total_ms = Date.now() - started;
+      tokenMetrics.recordTokenOutcome(429, timing);
       logEvent('warn', 'token.rate_limited', {
         requestId: req.requestId,
         reason: rate.reason,
@@ -228,6 +249,8 @@ app.get('/api/livekit/token', async (req, res) => {
     timing.authorization_ms = Date.now() - authzStarted;
 
     if (!decision.ok) {
+      timing.total_ms = Date.now() - started;
+      tokenMetrics.recordTokenOutcome(decision.status, timing);
       logEvent('info', 'token.denied', {
         requestId: req.requestId,
         room,
@@ -278,8 +301,11 @@ app.get('/api/livekit/token', async (req, res) => {
       durationMs: timing.total_ms,
       ...timing,
     });
+    tokenMetrics.recordTokenOutcome(200, timing);
     return res.json({ token, room: decision.room, identity: decision.identity, name: decision.name });
   } catch (error) {
+    timing.total_ms = Date.now() - started;
+    tokenMetrics.recordTokenOutcome(500, timing);
     logEvent('error', 'token.failed', {
       requestId: req.requestId,
       room,
@@ -340,7 +366,10 @@ app.post('/api/livekit/moderate', async (req, res) => {
       targetParticipant,
       action,
     });
-    if (!decision.ok) return res.status(decision.status).json({ error: decision.error });
+    if (!decision.ok) {
+      tokenMetrics.recordModeration(false);
+      return res.status(decision.status).json({ error: decision.error });
+    }
 
     const { error: updateError } = await supabaseAdmin
       .from('meeting_participants')
@@ -362,8 +391,10 @@ app.post('/api/livekit/moderate', async (req, res) => {
       });
     }
 
+    tokenMetrics.recordModeration(true);
     return res.json({ ok: true, action, targetIdentity });
   } catch (error) {
+    tokenMetrics.recordModeration(false);
     console.error('Failed to moderate LiveKit participant', error);
     return res.status(502).json({ error: 'The participant could not be moderated.' });
   }
