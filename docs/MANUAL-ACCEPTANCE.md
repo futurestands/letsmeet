@@ -53,9 +53,9 @@ Participant sees real shared pixels; stop share restores gallery; no fake captur
 **EXPECTED RESULT**
 UI + LiveKit moderation remain authoritative after refresh/reconnect; removed participant cannot mint a new token.
 
-**RESULT:** Covered by `npm run test:e2e:admin` on staging (in addition to dual-browser mute/remove).
+**RESULT:** Mute/remove/end covered by `npm run test:e2e:admin` and dual-browser gate. Lock/unlock remains best-effort in UI (device menu can be covered by LiveKit name overlays); Phase 3 DB suite covers lock RPC security.
 
-**STATUS:** STAGING VERIFIED (automated)
+**STATUS:** STAGING VERIFIED (mute/remove/end automated); lock UI MANUAL OPTIONAL
 
 ---
 

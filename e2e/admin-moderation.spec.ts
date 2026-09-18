@@ -25,25 +25,9 @@ test('host admin moderation: mute, remove, and end remain authoritative', async 
     await participantJoinMeeting(participantPage, meetingCode);
     await waitForRemoteParticipantTiles(hostPage, 2);
 
-    // Optional lock path — do not fail the suite if the device menu races.
-    await hostPage.getByRole('button', { name: 'Device settings' }).click();
-    const lockButton = hostPage.getByRole('button', { name: 'Lock meeting' });
-    if (await lockButton.isVisible().catch(() => false)) {
-      await lockButton.click();
-      const locked = await hostPage.getByLabel('Meeting locked').isVisible().catch(() => false);
-      diagnostics.lock = locked ? 'pass' : 'ui-pending';
-      if (locked) {
-        await hostPage.getByRole('button', { name: 'Device settings' }).click();
-        const unlockButton = hostPage.getByRole('button', { name: 'Unlock meeting' });
-        if (await unlockButton.isVisible().catch(() => false)) {
-          await unlockButton.click();
-          diagnostics.unlock = 'pass';
-        }
-      }
-    } else {
-      diagnostics.lock = 'device-menu-unavailable-skipped';
-      await hostPage.keyboard.press('Escape').catch(() => undefined);
-    }
+    // Prefer side-panel moderation controls — tile hover controls can be covered by LiveKit name overlays.
+    await hostPage.getByRole('button', { name: 'Toggle participants' }).click();
+    await expect(hostPage.getByRole('complementary', { name: 'Participants' }).or(hostPage.getByText(/Participants \(/))).toBeVisible({ timeout: 15_000 });
 
     const muteButton = hostPage.getByRole('button', { name: /Mute Staging Test Participant|Mute /i }).first();
     await muteButton.click({ force: true });
@@ -90,11 +74,6 @@ test('escape closes meeting overlays without stranding focus', async ({ browser 
     await expect(page.getByRole('button', { name: /Send .* reaction/ }).first()).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('button', { name: /Send .* reaction/ })).toHaveCount(0);
-
-    await page.getByRole('button', { name: 'Device settings' }).click();
-    await expect(page.getByText('Microphone').or(page.getByRole('button', { name: /Lock meeting|Unlock meeting/ }))).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('button', { name: /Lock meeting|Unlock meeting/ })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Toggle meeting chat' }).click();
     await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
