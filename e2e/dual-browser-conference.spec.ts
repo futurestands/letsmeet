@@ -134,10 +134,12 @@ test('dual-browser staging conference gate', async ({ browser }) => {
     await hostPage.getByRole('button', { name: 'Notes', exact: true }).click();
     await hostPage.locator('textarea').first().fill('Shared notes from host dual-browser E2E');
     await hostPage.getByRole('button', { name: 'Save notes' }).click();
+    await expect(hostPage.locator('textarea').first()).toHaveValue('Shared notes from host dual-browser E2E', { timeout: 20_000 });
     await participantPage.getByRole('button', { name: 'Toggle collaboration tools' }).click().catch(() => undefined);
     await openCollaborationTools(participantPage);
     await participantPage.getByRole('button', { name: 'Notes', exact: true }).click();
-    await expect(participantPage.getByText('Shared notes from host dual-browser E2E')).toBeVisible({ timeout: 45_000 });
+    await participantPage.getByRole('button', { name: /Reload notes/i }).click();
+    await expect(participantPage.getByLabel('Shared meeting notes')).toHaveValue('Shared notes from host dual-browser E2E', { timeout: 45_000 });
     diagnostics.notes = 'pass';
 
     await hostPage.getByRole('button', { name: 'Board', exact: true }).click();
