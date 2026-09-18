@@ -34,3 +34,5 @@ jobs:
         shell: bash
       - name: Note Windows-only DB suites
         run: echo "phase2-6 PostgreSQL security suites require local/Windows Postgres and are executed outside GitHub Actions."
+      - name: Note staging dual-browser E2E
+        run: echo "Playwright dual-browser E2E (npm run test:e2e:dual) requires staging secrets and system Chrome; run locally/CI with secrets, not on PRs from forks."

@@ -81,7 +81,7 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
       void reload().catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Collaboration tools could not load.'));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [reload]);
+  }, [reload, tab]);
 
   useEffect(() => {
     const channel = supabase
@@ -148,7 +148,16 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
     <aside className="flex max-h-[42dvh] w-full min-h-0 shrink-0 flex-col overflow-hidden border-t border-slate-800 bg-slate-900 md:max-h-none md:w-96 md:border-l md:border-t-0">
       <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-3 py-2 text-xs">
         {([['polls', 'Polls'], ['qa', 'Q&A'], ['notes', 'Notes'], ['board', 'Board'], ['intel', 'Intel']] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)} className={`rounded-full px-3 py-1 ${tab === id ? 'bg-blue-600 text-white' : 'text-slate-300'}`}>{label}</button>
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            aria-label={label}
+            aria-pressed={tab === id}
+            className={`rounded-full px-3 py-1 ${tab === id ? 'bg-blue-600 text-white' : 'text-slate-300'}`}
+          >
+            {label}
+          </button>
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4 text-sm text-slate-200">
@@ -174,7 +183,7 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
                   <input type="checkbox" checked={anonymousPoll} onChange={(event) => setAnonymousPoll(event.target.checked)} />
                   Anonymous votes
                 </label>
-                <button className="rounded-lg bg-blue-600 px-3 py-2 text-white">Create poll</button>
+                <button type="submit" className="rounded-lg bg-blue-600 px-3 py-2 text-white" aria-label="Create poll">Create poll</button>
               </form>
             )}
             {polls.length === 0 && <p className="text-slate-400">No polls yet.</p>}
@@ -255,7 +264,7 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
             }}
           >
             <textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} className="min-h-48 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" placeholder="Shared notes are saved on the server." />
-            <button className="rounded-lg bg-blue-600 px-3 py-2 text-white">Save notes</button>
+            <button type="submit" className="rounded-lg bg-blue-600 px-3 py-2 text-white" aria-label="Save notes">Save notes</button>
             {notes && <p className="text-xs text-slate-500">Version {notes.version}</p>}
           </form>
         )}
@@ -275,7 +284,7 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
           <div className="space-y-4">
             {isHost && (
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => void startRecording()} className="rounded-lg bg-red-600 px-3 py-2 text-white">Start recording</button>
+                <button type="button" onClick={() => void startRecording()} className="rounded-lg bg-red-600 px-3 py-2 text-white" aria-label="Start recording">Start recording</button>
                 {recordings[0] && ['queued', 'starting', 'active'].includes(recordings[0].status) && (
                   <button onClick={() => void requestStopRecording(recordings[0].id).then(() => reload())} className="rounded-lg border border-slate-600 px-3 py-2">Stop</button>
                 )}

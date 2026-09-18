@@ -17,6 +17,7 @@ const requiredMigrations = [
   '009_collaboration.sql',
   '010_recordings_ai_enterprise.sql',
   '011_hardening_indexes_and_audit.sql',
+  '012_collaboration_realtime_publication.sql',
 ];
 const publicVariables = [
   'VITE_SUPABASE_URL',
