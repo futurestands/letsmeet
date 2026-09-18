@@ -129,5 +129,5 @@ See `scripts/media-scale-harness.md`. Prefer LiveKit agents over 500 GUI browser
 
 ## Decision
 
-Until staged LiveKit media soaks produce evidence at 100+, treat large-meeting marketing claims as **unsupported**.  
+Until staged LiveKit media soaks produce evidence at 100+, treat large-meeting marketing claims as **unsupported**.
 **500 participants = NOT SUPPORTED.**
