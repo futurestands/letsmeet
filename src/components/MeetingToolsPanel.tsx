@@ -259,13 +259,56 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
             onSubmit={(event) => {
               event.preventDefault();
               void saveMeetingNotes(meetingId, noteDraft, notes?.version ?? 0)
-                .then((saved) => { setNotes(saved); setError(null); })
-                .catch((noteError) => setError(noteError instanceof Error ? noteError.message : 'Notes could not be saved.'));
+                .then((saved) => {
+                  setNotes(saved);
+                  setNoteDraft(saved.content);
+                  setError(null);
+                })
+                .catch(async (noteError) => {
+                  const message = noteError instanceof Error ? noteError.message : 'Notes could not be saved.';
+                  setError(message);
+                  if (/someone else|updated by|version|conflict|stale/i.test(message)) {
+                    try {
+                      const latest = await loadMeetingNotes(meetingId);
+                      if (latest) {
+                        setNotes(latest);
+                        setNoteDraft(latest.content);
+                        setError('Notes were updated by someone else. Your draft was replaced with the latest server version. Re-apply your edits and save again.');
+                      }
+                    } catch {
+                      // keep original error
+                    }
+                  }
+                });
             }}
           >
-            <textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} className="min-h-48 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" placeholder="Shared notes are saved on the server." />
-            <button type="submit" className="rounded-lg bg-blue-600 px-3 py-2 text-white" aria-label="Save notes">Save notes</button>
-            {notes && <p className="text-xs text-slate-500">Version {notes.version}</p>}
+            <textarea
+              value={noteDraft}
+              onChange={(event) => setNoteDraft(event.target.value)}
+              className="min-h-48 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2"
+              placeholder="Shared notes are saved on the server."
+              aria-label="Shared meeting notes"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" className="rounded-lg bg-blue-600 px-3 py-2 text-white" aria-label="Save notes">Save notes</button>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-600 px-3 py-2"
+                aria-label="Reload notes from server"
+                onClick={() => {
+                  void loadMeetingNotes(meetingId)
+                    .then((latest) => {
+                      setNotes(latest);
+                      setNoteDraft(latest?.content ?? '');
+                      setError(null);
+                    })
+                    .catch((reloadError) => setError(reloadError instanceof Error ? reloadError.message : 'Notes could not be reloaded.'));
+                }}
+              >
+                Reload
+              </button>
+            </div>
+            {notes && <p className="text-xs text-slate-500">Version {notes.version}. Concurrent edits use optimistic locking — stale saves are rejected.</p>}
           </form>
         )}
 

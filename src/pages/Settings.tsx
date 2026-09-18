@@ -154,8 +154,14 @@ export default function Settings() {
                   .catch((inviteError) => setError(inviteError instanceof Error ? inviteError.message : 'Invitation failed.'));
               }}
             >
-              <input value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="input-field min-w-0 flex-1" placeholder="Invite email" />
-              <button className="btn-primary">Invite member</button>
+              <input
+                value={inviteEmail}
+                onChange={(event) => setInviteEmail(event.target.value)}
+                className="input-field min-w-0 flex-1"
+                placeholder="Invite email"
+                aria-label="Organization invite email"
+              />
+              <button type="submit" className="btn-primary" aria-label="Invite organization member">Invite member</button>
             </form>
           )}
           <ul className="mt-4 divide-y divide-slate-100">
@@ -168,6 +174,7 @@ export default function Settings() {
                 {isAdmin && member.role !== 'owner' && (
                   <select
                     value={member.role}
+                    aria-label={`Change role for member ${member.user_id}`}
                     onChange={(event) => {
                       void updateOrganizationMemberRole(member.id, event.target.value)
                         .then(() => setNotice('Role updated.'))
@@ -197,15 +204,15 @@ export default function Settings() {
                   .catch((saveError) => setError(saveError instanceof Error ? saveError.message : 'Settings could not be saved.'));
               }}
             >
-              <label className="block text-sm">
+              <label className="block text-sm" htmlFor="retention-days">
                 Recording retention (days)
-                <input type="number" min={1} max={3650} value={retentionDays} onChange={(event) => setRetentionDays(Number(event.target.value))} className="input-field mt-1" />
+                <input id="retention-days" type="number" min={1} max={3650} value={retentionDays} onChange={(event) => setRetentionDays(Number(event.target.value))} className="input-field mt-1" />
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={recordingsEnabled} onChange={(event) => setRecordingsEnabled(event.target.checked)} />
+              <label className="flex items-center gap-2 text-sm" htmlFor="recordings-enabled">
+                <input id="recordings-enabled" type="checkbox" checked={recordingsEnabled} onChange={(event) => setRecordingsEnabled(event.target.checked)} />
                 Allow meeting recordings
               </label>
-              <button className="btn-primary">Save settings</button>
+              <button type="submit" className="btn-primary" aria-label="Save organization settings">Save settings</button>
             </form>
             {settings && <p className="mt-3 text-xs text-slate-500">Current retention: {settings.retention_days} days.</p>}
           </section>

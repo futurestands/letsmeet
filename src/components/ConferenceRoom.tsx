@@ -196,11 +196,17 @@ function ConferenceExperience({
           setHandRaised(rows.some((row) => row.user_id === user.id));
         });
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'meeting_reactions', filter: `meeting_id=eq.${meeting.id}` }, (payload) => {
+        const row = payload.new as { user_id?: string; emoji?: string; id?: string };
+        if (row?.user_id && row?.emoji) {
+          addReaction(row.user_id, row.emoji, row.id || `${row.user_id}-${Date.now()}`);
+        }
+      })
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [meeting.id, refreshMessages, user.id]);
+  }, [addReaction, meeting.id, refreshMessages, user.id]);
 
   useEffect(() => {
     if (connectionState === ConnectionState.Connected && settings.audioOutputDeviceId) {
@@ -293,7 +299,7 @@ function ConferenceExperience({
     addReaction(user.id, emoji, `${user.id}-${nonce}`);
     try {
       await sendMeetingReaction(meeting.id, emoji);
-      await sendEvent(encodeConferenceEvent({ type: 'reaction', emoji, nonce }), { reliable: false });
+      await sendEvent(encodeConferenceEvent({ type: 'reaction', emoji, nonce }), { reliable: true });
     } catch {
       setActionError('The reaction could not be saved.');
     }
@@ -469,6 +475,7 @@ function ConferenceExperience({
           </button>
           {showReactions && (
             <div className="absolute bottom-16 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
+              <p className="w-full px-2 pb-1 text-center text-[10px] text-slate-400">Reactions are short-lived overlays for everyone in the call.</p>
               {REACTIONS.map((emoji) => (
                 <button key={emoji} onClick={(event) => void sendReaction(emoji, event.timeStamp)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
               ))}

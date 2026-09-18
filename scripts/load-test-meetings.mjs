@@ -60,6 +60,23 @@ console.log('This is not a 500-participant LiveKit media soak. It measures token
 console.log(`Endpoint: ${endpoint}`);
 console.log(`Auth: ${authorization ? 'Bearer token provided' : 'unauthenticated (expect 401)'}`);
 
+const cold = await timedRequest();
+console.log(`cold request: status=${cold.status} latency=${Math.round(cold.latencyMs)}ms`);
+const warmSamples = [];
+for (let i = 0; i < 5; i += 1) {
+  warmSamples.push(await timedRequest());
+}
+const warmOk = warmSamples.filter((row) => row.ok);
+const warmLatencies = warmSamples.map((row) => row.latencyMs).sort((a, b) => a - b);
+console.log(
+  `warm serial x5: success=${warmOk.length}/5 `
+  + `p50=${percentile(warmLatencies, 50)}ms p95=${percentile(warmLatencies, 95)}ms `
+  + `statuses=${JSON.stringify(warmSamples.reduce((acc, row) => {
+    acc[row.status] = (acc[row.status] ?? 0) + 1;
+    return acc;
+  }, {}))}`,
+);
+
 const rows = [];
 for (const stage of stages) {
   const row = await runStage(stage);
@@ -71,6 +88,7 @@ for (const stage of stages) {
   );
 }
 
-console.log(JSON.stringify({ summary: rows }, null, 2));
+console.log(JSON.stringify({ cold: { status: cold.status, latencyMs: Math.round(cold.latencyMs) }, warm: warmSamples.map((row) => ({ status: row.status, latencyMs: Math.round(row.latencyMs) })), summary: rows }, null, 2));
 console.log('LiveKit media scale still requires SFU instrumentation, TURN validation, and progressive room soaks.');
 console.log('Do not claim 500 participants are supported until media-connected stages pass.');
+console.log('Rate-limit 429 responses are intentional policy, not a latency bug to “fix” by raising limits.');
