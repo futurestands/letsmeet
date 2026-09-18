@@ -25,6 +25,7 @@
     "test:rate-limit": "node scripts/rate-limit-policy-test.mjs",
     "test:notifications": "node scripts/notification-dispatch-test.mjs",
     "test:org-matrix": "node --env-file=.env.staging.local scripts/org-role-matrix-test.mjs",
+    "test:token-perf": "node --env-file=.env.staging.local scripts/token-perf-probe.mjs",
     "staging:preflight": "node scripts/staging-preflight.mjs",
     "staging:seed": "node --env-file=.env.staging.local scripts/staging-seed.mjs",
     "dev:staging": "vite --mode staging",

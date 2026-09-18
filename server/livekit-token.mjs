@@ -100,6 +100,10 @@ app.get('/api/transcription/status', (_req, res) => {
 
 app.get('/api/livekit/token', async (req, res) => {
   const started = Date.now();
+  const timing = {};
+  const mark = (key) => {
+    timing[key] = Date.now() - started;
+  };
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const room = normalizeRoomCode(req.query.room);
@@ -124,18 +128,36 @@ app.get('/api/livekit/token', async (req, res) => {
   }
 
   try {
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    // Auth and meeting resolution do not depend on each other — overlap the RTTs.
+    const authStarted = Date.now();
+    const meetingStarted = Date.now();
+    const [authResult, meetingResult] = await Promise.all([
+      supabaseAdmin.auth.getUser(authToken),
+      isAllowedRoomCode(room)
+        ? supabaseAdmin
+            .from('meetings')
+            .select('id, code, host_id, status, organization_id, workspace_id')
+            .eq('code', room)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    timing.auth_ms = Date.now() - authStarted;
+    timing.meeting_ms = Date.now() - meetingStarted;
+    mark('auth_meeting_wall_ms');
 
-    if (authError || !user) {
+    const user = authResult.data?.user;
+    if (authResult.error || !user) {
       return res.status(401).json({ error: 'Session is invalid or expired.' });
     }
 
+    const rateStarted = Date.now();
     const rate = tokenRateLimiter.evaluateTokenRequest({
       ip: req.ip,
       userId: user.id,
       room,
       authenticated: true,
     });
+    timing.rate_limit_ms = Date.now() - rateStarted;
     if (!rate.ok) {
       logEvent('warn', 'token.rate_limited', {
         requestId: req.requestId,
@@ -143,47 +165,31 @@ app.get('/api/livekit/token', async (req, res) => {
         room,
         userId: user.id,
         durationMs: Date.now() - started,
+        ...timing,
       });
       return res.status(429).json({ error: 'Too many token requests. Try again shortly.' });
     }
 
-    const { data: meeting, error: meetingError } = await supabaseAdmin
-      .from('meetings')
-      .select('id, code, host_id, status, organization_id, workspace_id')
-      .eq('code', room)
-      .maybeSingle();
-
-    if (meetingError) {
+    if (meetingResult.error) {
       return res.status(500).json({ error: 'Unable to resolve the meeting.' });
     }
+    const meeting = meetingResult.data;
 
-    const [participantResult, membershipResult, workspaceResult] = meeting
-      ? await Promise.all([
-        supabaseAdmin
+    // evaluateLiveKitAccess authorizes via participant row (+ meeting status).
+    // Organization/workspace lookups were unused for the allow/deny decision and
+    // added a third remote query under concurrency.
+    const participantStarted = Date.now();
+    const { data: participant } = meeting
+      ? await supabaseAdmin
           .from('meeting_participants')
           .select('id, meeting_id, user_id, organization_id, workspace_id, role, status')
           .eq('meeting_id', meeting.id)
           .eq('user_id', user.id)
-          .maybeSingle(),
-        supabaseAdmin
-          .from('organization_members')
-          .select('id, status')
-          .eq('organization_id', meeting.organization_id)
-          .eq('user_id', user.id)
-          .eq('status', 'active')
-          .maybeSingle(),
-        supabaseAdmin
-          .from('workspaces')
-          .select('id, organization_id')
-          .eq('id', meeting.workspace_id)
-          .maybeSingle(),
-      ])
-      : [{ data: null }, { data: null }, { data: null }];
+          .maybeSingle()
+      : { data: null };
+    timing.participant_ms = Date.now() - participantStarted;
 
-    const participant = participantResult.data;
-    const membership = membershipResult.data;
-    const workspace = workspaceResult.data;
-
+    const authzStarted = Date.now();
     const decision = evaluateLiveKitAccess({
       isAuthenticated: true,
       userId: user.id,
@@ -191,14 +197,15 @@ app.get('/api/livekit/token', async (req, res) => {
       requestedRoom: room,
       meeting,
       participant,
-      organizationMember: Boolean(membership),
-      workspaceMember: Boolean(workspace && workspace.organization_id === meeting.organization_id && membership),
+      organizationMember: false,
+      workspaceMember: false,
       requestedIdentity: req.query.identity,
       requestedName: req.query.name,
       requestedRole: req.query.role,
       requestedOrganizationId: req.query.organization_id,
       requestedWorkspaceId: req.query.workspace_id,
     });
+    timing.authorization_ms = Date.now() - authzStarted;
 
     if (!decision.ok) {
       logEvent('info', 'token.denied', {
@@ -207,10 +214,12 @@ app.get('/api/livekit/token', async (req, res) => {
         userId: user.id,
         status: decision.status,
         durationMs: Date.now() - started,
+        ...timing,
       });
       return res.status(decision.status).json({ error: decision.error });
     }
 
+    const livekitStarted = Date.now();
     const at = new AccessToken(apiKey, apiSecret, {
       identity: decision.identity,
       name: decision.name,
@@ -226,11 +235,28 @@ app.get('/api/livekit/token', async (req, res) => {
     });
 
     const token = await at.toJwt();
+    timing.livekit_token_ms = Date.now() - livekitStarted;
+    timing.total_ms = Date.now() - started;
+
+    res.setHeader(
+      'Server-Timing',
+      [
+        `auth;dur=${timing.auth_ms}`,
+        `meeting;dur=${timing.meeting_ms}`,
+        `auth_meeting_wall;dur=${timing.auth_meeting_wall_ms}`,
+        `participant;dur=${timing.participant_ms}`,
+        `authorization;dur=${timing.authorization_ms}`,
+        `livekit;dur=${timing.livekit_token_ms}`,
+        `total;dur=${timing.total_ms}`,
+      ].join(', '),
+    );
+
     logEvent('info', 'token.issued', {
       requestId: req.requestId,
       room: decision.room,
       userId: user.id,
-      durationMs: Date.now() - started,
+      durationMs: timing.total_ms,
+      ...timing,
     });
     return res.json({ token, room: decision.room, identity: decision.identity, name: decision.name });
   } catch (error) {
@@ -239,6 +265,7 @@ app.get('/api/livekit/token', async (req, res) => {
       room,
       durationMs: Date.now() - started,
       message: error instanceof Error ? error.message : 'unknown',
+      ...timing,
     });
     return res.status(500).json({ error: 'Unable to issue a LiveKit token.' });
   }
