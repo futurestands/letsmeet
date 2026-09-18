@@ -75,16 +75,21 @@ describe('conference utilities', () => {
     expect(canUseHostControls('user-a', null)).toBe(false);
   });
 
-  it('keeps participant tile order stable when the active speaker changes', () => {
+  it('keeps local first and prioritizes active speakers without rearranging peers', () => {
     const tiles = [
-      { identity: 'user-b', isLocal: false, name: 'Bravo' },
-      { identity: 'user-a', isLocal: true, name: 'Alpha' },
-      { identity: 'user-c', isLocal: false, name: 'Charlie' },
+      { identity: 'user-b', isLocal: false, name: 'Bravo', speaking: false },
+      { identity: 'user-a', isLocal: true, name: 'Alpha', speaking: false },
+      { identity: 'user-c', isLocal: false, name: 'Charlie', speaking: false },
     ];
     const first = [...tiles].sort(compareParticipantTiles).map((tile) => tile.identity);
-    const afterSpeakerChange = [...tiles].reverse().sort(compareParticipantTiles).map((tile) => tile.identity);
     expect(first).toEqual(['user-a', 'user-b', 'user-c']);
-    expect(afterSpeakerChange).toEqual(first);
+
+    const withSpeaker = tiles.map((tile) => (
+      tile.identity === 'user-c' ? { ...tile, speaking: true } : tile
+    ));
+    expect([...withSpeaker].sort(compareParticipantTiles).map((tile) => tile.identity))
+      .toEqual(['user-a', 'user-c', 'user-b']);
+
     expect(isActiveSpeaker('user-c', new Set(['user-c']))).toBe(true);
     expect(isActiveSpeaker('user-b', new Set(['user-c']))).toBe(false);
     expect(visibleParticipantRange(1, 20)).toEqual({ start: 16, end: 20 });

@@ -134,6 +134,7 @@ export type ParticipantTileOrderInput = {
   identity: string;
   isLocal: boolean;
   name?: string | null;
+  speaking?: boolean;
 };
 
 export type AudioTrackDescriptor = {
@@ -147,6 +148,9 @@ export function compareParticipantTiles(
   right: ParticipantTileOrderInput,
 ): number {
   if (left.isLocal !== right.isLocal) return left.isLocal ? -1 : 1;
+  const leftSpeaking = Boolean(left.speaking);
+  const rightSpeaking = Boolean(right.speaking);
+  if (leftSpeaking !== rightSpeaking) return leftSpeaking ? -1 : 1;
   return (left.name || left.identity).localeCompare(right.name || right.identity);
 }
 

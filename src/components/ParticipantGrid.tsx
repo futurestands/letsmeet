@@ -39,9 +39,19 @@ const ParticipantGrid = memo(function ParticipantGrid({
   const screenShares = useTracks([Track.Source.ScreenShare], { onlySubscribed: true });
 
   const orderedTracks = useMemo(() => [...cameraTracks].sort((left, right) => compareParticipantTiles(
-    { identity: left.participant.identity, isLocal: left.participant.isLocal, name: left.participant.name },
-    { identity: right.participant.identity, isLocal: right.participant.isLocal, name: right.participant.name },
-  )), [cameraTracks]);
+    {
+      identity: left.participant.identity,
+      isLocal: left.participant.isLocal,
+      name: left.participant.name,
+      speaking: speakerIdentities.has(left.participant.identity),
+    },
+    {
+      identity: right.participant.identity,
+      isLocal: right.participant.isLocal,
+      name: right.participant.name,
+      speaking: speakerIdentities.has(right.participant.identity),
+    },
+  )), [cameraTracks, speakerIdentities]);
 
   const safePage = clampParticipantPage(page, orderedTracks.length);
   const range = visibleParticipantRange(safePage, orderedTracks.length);
