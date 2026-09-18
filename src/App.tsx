@@ -6,6 +6,8 @@ import ScheduleMeeting from './pages/ScheduleMeeting';
 import JoinMeeting from './pages/JoinMeeting';
 import Settings from './pages/Settings';
 import Auth from './pages/Auth';
+import Meetings from './pages/Meetings';
+import MeetingDetails from './pages/MeetingDetails';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -32,9 +34,11 @@ function App() {
         <Routes>
           <Route path="/auth" element={<Auth />} />
           <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-          <Route path="/meet" element={<ProtectedRoute><MeetingRoom /></ProtectedRoute>} />
+          <Route path="/meet/:meetingCode" element={<ProtectedRoute><MeetingRoom /></ProtectedRoute>} />
           <Route path="/schedule" element={<ProtectedRoute><ScheduleMeeting /></ProtectedRoute>} />
-          <Route path="/join" element={<ProtectedRoute><JoinMeeting /></ProtectedRoute>} />
+          <Route path="/join/:meetingCode?" element={<ProtectedRoute><JoinMeeting /></ProtectedRoute>} />
+          <Route path="/meetings" element={<ProtectedRoute><Meetings /></ProtectedRoute>} />
+          <Route path="/meetings/:meetingId" element={<ProtectedRoute><MeetingDetails /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

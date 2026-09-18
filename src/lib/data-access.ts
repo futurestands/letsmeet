@@ -1,16 +1,20 @@
 import { supabase } from './supabase';
+import { isValidMeetingCode, normalizeMeetingCode, type MeetingStatus, type ParticipantRole } from './meeting-utils';
+
+export type ParticipantStatus = 'joined' | 'muted' | 'waiting' | 'left' | 'removed';
 
 export type MeetingSummary = {
   id: string;
   code: string;
   title: string;
   host_id: string;
-  status?: string | null;
+  status: MeetingStatus;
   created_at?: string | null;
+  scheduled_for?: string | null;
   started_at?: string | null;
   ended_at?: string | null;
-  organization_id?: string | null;
-  workspace_id?: string | null;
+  organization_id: string;
+  workspace_id: string;
 };
 
 export type ScheduledMeetingSummary = {
@@ -18,12 +22,25 @@ export type ScheduledMeetingSummary = {
   title: string;
   date: string;
   time: string;
+  timezone: string;
   host_id: string;
   meeting_code?: string | null;
   created_at?: string | null;
-  status?: string | null;
-  organization_id?: string | null;
-  workspace_id?: string | null;
+  scheduled_for?: string | null;
+  status: MeetingStatus;
+  organization_id: string;
+  workspace_id: string;
+};
+
+export type ParticipantSummary = {
+  id: string;
+  meeting_id: string;
+  user_id: string;
+  user_name: string;
+  role: ParticipantRole;
+  status: ParticipantStatus;
+  joined_at?: string | null;
+  left_at?: string | null;
 };
 
 export type UserOrganizationContext = {
@@ -37,10 +54,22 @@ export type UserOrganizationContext = {
   status: string;
 };
 
+export type JoinedMeeting = MeetingSummary & {
+  participant_id: string;
+  participant_role: ParticipantRole;
+  participant_status: ParticipantStatus;
+};
+
+const meetingSelect = 'id, code, title, host_id, status, created_at, scheduled_for, started_at, ended_at, organization_id, workspace_id';
+const scheduledMeetingSelect = 'id, title, date, time, timezone, host_id, meeting_code, created_at, scheduled_for, status, organization_id, workspace_id';
+const participantSelect = 'id, meeting_id, user_id, user_name, role, status, joined_at, left_at';
+
+function asMeetingSummary(row: MeetingSummary | null): MeetingSummary | null {
+  return row ?? null;
+}
+
 export async function getUserOrganizationContext(userId: string): Promise<UserOrganizationContext | null> {
-  if (!userId) {
-    return null;
-  }
+  if (!userId) return null;
 
   const { data: membership, error: membershipError } = await supabase
     .from('organization_members')
@@ -51,27 +80,16 @@ export async function getUserOrganizationContext(userId: string): Promise<UserOr
     .limit(1)
     .maybeSingle();
 
-  if (membershipError && membershipError.code !== 'PGRST116') {
-    throw membershipError;
-  }
-
-  if (!membership) {
-    return null;
-  }
+  if (membershipError && membershipError.code !== 'PGRST116') throw membershipError;
+  if (!membership) return null;
 
   const { data: organization, error: organizationError } = await supabase
     .from('organizations')
     .select('id, name, slug')
     .eq('id', membership.organization_id)
     .maybeSingle();
-
-  if (organizationError) {
-    throw organizationError;
-  }
-
-  if (!organization) {
-    return null;
-  }
+  if (organizationError) throw organizationError;
+  if (!organization) return null;
 
   const { data: workspace, error: workspaceError } = await supabase
     .from('workspaces')
@@ -80,10 +98,7 @@ export async function getUserOrganizationContext(userId: string): Promise<UserOr
     .order('created_at', { ascending: true })
     .limit(1)
     .maybeSingle();
-
-  if (workspaceError && workspaceError.code !== 'PGRST116') {
-    throw workspaceError;
-  }
+  if (workspaceError && workspaceError.code !== 'PGRST116') throw workspaceError;
 
   return {
     organization_id: organization.id,
@@ -97,101 +112,139 @@ export async function getUserOrganizationContext(userId: string): Promise<UserOr
   };
 }
 
-export async function listMeetingsForUser(userId: string): Promise<MeetingSummary[]> {
+export async function listMeetingsForUser(): Promise<MeetingSummary[]> {
   const { data, error } = await supabase
     .from('meetings')
-    .select('id, code, title, host_id, status, created_at, started_at, ended_at, organization_id, workspace_id')
-    .eq('host_id', userId)
+    .select(meetingSelect)
     .order('created_at', { ascending: false })
-    .limit(20);
-
+    .limit(100);
   if (error) throw error;
   return (data ?? []) as MeetingSummary[];
 }
 
-export async function listScheduledMeetingsForUser(userId: string): Promise<ScheduledMeetingSummary[]> {
+export async function listScheduledMeetingsForUser(): Promise<ScheduledMeetingSummary[]> {
   const { data, error } = await supabase
     .from('scheduled_meetings')
-    .select('id, title, date, time, host_id, meeting_code, created_at, status, organization_id, workspace_id')
-    .eq('host_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(20);
-
+    .select(scheduledMeetingSelect)
+    .order('scheduled_for', { ascending: true, nullsFirst: false })
+    .limit(100);
   if (error) throw error;
   return (data ?? []) as ScheduledMeetingSummary[];
 }
 
-export async function findMeetingByCode(code: string): Promise<MeetingSummary | null> {
-  const normalizedCode = String(code || '').trim();
-  if (!normalizedCode) return null;
+export async function listMyParticipations(): Promise<ParticipantSummary[]> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData.session?.user?.id;
+  if (!userId) return [];
 
   const { data, error } = await supabase
+    .from('meeting_participants')
+    .select(participantSelect)
+    .eq('user_id', userId)
+    .order('joined_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []) as ParticipantSummary[];
+}
+
+export async function findMeetingByCode(code: string): Promise<MeetingSummary | null> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) return null;
+  const { data, error } = await supabase
     .from('meetings')
-    .select('id, code, title, host_id, status, created_at, started_at, ended_at, organization_id, workspace_id')
+    .select(meetingSelect)
     .eq('code', normalizedCode)
     .maybeSingle();
-
-  if (error && error.code !== 'PGRST116') {
-    throw error;
-  }
-
-  return (data as MeetingSummary | null) ?? null;
+  if (error && error.code !== 'PGRST116') throw error;
+  return asMeetingSummary(data as MeetingSummary | null);
 }
 
-export async function createMeetingRecord(input: {
-  title: string;
-  hostId: string;
-  code: string;
-  status?: string;
-  organizationId?: string | null;
-  workspaceId?: string | null;
-}) {
-  const payload: Record<string, string | null | undefined> = {
-    title: input.title,
-    code: input.code,
-    host_id: input.hostId,
-    status: input.status ?? 'live',
-    organization_id: input.organizationId ?? null,
-    workspace_id: input.workspaceId ?? null,
-  };
+export async function findMeetingById(id: string): Promise<MeetingSummary | null> {
+  if (!id) return null;
+  const { data, error } = await supabase.from('meetings').select(meetingSelect).eq('id', id).maybeSingle();
+  if (error && error.code !== 'PGRST116') throw error;
+  return asMeetingSummary(data as MeetingSummary | null);
+}
 
+export async function listParticipantsForMeeting(meetingId: string): Promise<ParticipantSummary[]> {
   const { data, error } = await supabase
-    .from('meetings')
-    .insert(payload)
-    .select('id, code, title, host_id, status, organization_id, workspace_id, created_at')
-    .maybeSingle();
-
+    .from('meeting_participants')
+    .select(participantSelect)
+    .eq('meeting_id', meetingId)
+    .order('joined_at', { ascending: true });
   if (error) throw error;
-  return data;
+  return (data ?? []) as ParticipantSummary[];
 }
 
-export async function createScheduledMeeting(input: {
+export async function createPersistentMeeting(title = 'New meeting', workspaceId?: string | null): Promise<MeetingSummary> {
+  const { data, error } = await supabase.rpc('create_persistent_meeting', {
+    p_title: title,
+    p_workspace_id: workspaceId ?? null,
+  });
+  if (error) throw error;
+  return data as MeetingSummary;
+}
+
+export async function schedulePersistentMeeting(input: {
   title: string;
   date: string;
   time: string;
-  hostId: string;
-  code?: string | null;
-  organizationId?: string | null;
+  timezone: string;
   workspaceId?: string | null;
-}) {
-  const payload: Record<string, string | null | undefined> = {
-    title: input.title,
-    date: input.date,
-    time: input.time,
-    host_id: input.hostId,
-    duration: '30',
-    status: 'scheduled',
-    meeting_code: input.code ?? null,
-    organization_id: input.organizationId ?? null,
-    workspace_id: input.workspaceId ?? null,
-  };
-
-  const { data, error } = await supabase
-    .from('scheduled_meetings')
-    .insert(payload)
-    .select('id, title, date, time, host_id, meeting_code, status, organization_id, workspace_id, created_at')
-    .maybeSingle();
-
+}): Promise<ScheduledMeetingSummary> {
+  const { data, error } = await supabase.rpc('schedule_persistent_meeting', {
+    p_title: input.title,
+    p_date: input.date,
+    p_time: input.time,
+    p_timezone: input.timezone,
+    p_workspace_id: input.workspaceId ?? null,
+  });
   if (error) throw error;
-  return data;
+  return data as ScheduledMeetingSummary;
+}
+
+function mapJoinedMeeting(row: Record<string, string>): JoinedMeeting {
+  return {
+    id: row.meeting_id,
+    code: row.meeting_code,
+    title: row.title,
+    host_id: row.host_id,
+    organization_id: row.organization_id,
+    workspace_id: row.workspace_id,
+    status: row.meeting_status as MeetingStatus,
+    scheduled_for: row.scheduled_for,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    created_at: row.created_at,
+    participant_id: row.participant_id,
+    participant_role: row.participant_role as ParticipantRole,
+    participant_status: row.participant_status as ParticipantStatus,
+  };
+}
+
+export async function joinPersistentMeeting(code: string): Promise<JoinedMeeting> {
+  const normalizedCode = normalizeMeetingCode(code);
+  if (!isValidMeetingCode(normalizedCode)) {
+    throw new Error('Enter a valid six-character meeting code.');
+  }
+
+  const { data, error } = await supabase.rpc('join_persistent_meeting', { p_code: normalizedCode });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, string> | null;
+  if (!row) throw new Error('Meeting could not be joined.');
+  return mapJoinedMeeting(row);
+}
+
+export async function leavePersistentMeeting(meetingId: string): Promise<void> {
+  const { error } = await supabase.rpc('leave_persistent_meeting', { p_meeting_id: meetingId });
+  if (error) throw error;
+}
+
+export async function transitionPersistentMeeting(meetingId: string, status: MeetingStatus): Promise<MeetingSummary> {
+  const { data, error } = await supabase.rpc('transition_persistent_meeting', {
+    p_meeting_id: meetingId,
+    p_status: status,
+  });
+  if (error) throw error;
+  return data as MeetingSummary;
 }

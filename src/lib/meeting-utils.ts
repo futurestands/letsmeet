@@ -1,18 +1,7 @@
-const MEETING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-
 export type MemberRole = 'owner' | 'admin' | 'member' | 'guest';
 export type ParticipantRole = 'host' | 'co-host' | 'moderator' | 'participant';
-
-export function generateMeetingCode(): string {
-  const values = new Uint32Array(6);
-  crypto.getRandomValues(values);
-
-  const code = Array.from(values)
-    .map((value) => MEETING_ALPHABET[value % MEETING_ALPHABET.length])
-    .join('');
-
-  return `LM-${code}`;
-}
+export type MeetingStatus = 'scheduled' | 'waiting' | 'live' | 'ended' | 'cancelled';
+export type MeetingHistoryFilter = 'upcoming' | 'active' | 'past' | 'hosted' | 'joined';
 
 export function normalizeMeetingCode(input: string): string {
   const sanitized = input.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -27,6 +16,22 @@ export function normalizeMeetingCode(input: string): string {
   }
 
   return `LM-${token}`;
+}
+
+export function isValidMeetingCode(input?: string | null): boolean {
+  return /^LM-[A-Z0-9]{6}$/.test(String(input ?? '').trim().toUpperCase());
+}
+
+export function meetingRoomPath(code: string): string {
+  return `/meet/${encodeURIComponent(normalizeMeetingCode(code))}`;
+}
+
+export function meetingJoinPath(code: string): string {
+  return `/join/${encodeURIComponent(normalizeMeetingCode(code))}`;
+}
+
+export function meetingDetailsPath(meetingId: string): string {
+  return `/meetings/${encodeURIComponent(meetingId)}`;
 }
 
 export function isUserMemberOfOrganization(role?: string | null, status?: string | null): boolean {
@@ -51,6 +56,26 @@ export function resolveParticipantRole(input: {
   return 'participant';
 }
 
+export function isJoinableMeetingStatus(status?: string | null): boolean {
+  return ['scheduled', 'waiting', 'live'].includes(String(status ?? '').toLowerCase());
+}
+
+export function isActiveMeetingStatus(status?: string | null): boolean {
+  return ['waiting', 'live'].includes(String(status ?? '').toLowerCase());
+}
+
+export function isPastMeetingStatus(status?: string | null): boolean {
+  return ['ended', 'cancelled'].includes(String(status ?? '').toLowerCase());
+}
+
+export function isValidMeetingTransition(from: MeetingStatus, to: MeetingStatus): boolean {
+  return (
+    (from === 'scheduled' && ['waiting', 'cancelled'].includes(to))
+    || (from === 'waiting' && ['live', 'cancelled', 'ended'].includes(to))
+    || (from === 'live' && ['ended', 'cancelled'].includes(to))
+  );
+}
+
 export function canAccessMeeting(input: {
   userId?: string | null;
   meetingHostId?: string | null;
@@ -64,7 +89,7 @@ export function canAccessMeeting(input: {
     return false;
   }
 
-  if (input.meetingStatus && ['cancelled', 'ended'].includes(String(input.meetingStatus).toLowerCase())) {
+  if (input.meetingStatus && isPastMeetingStatus(input.meetingStatus)) {
     return false;
   }
 
@@ -81,14 +106,35 @@ export function canIssueLiveKitToken(input: {
   workspaceMember: boolean;
   participantMembership: boolean;
   meetingStatus?: string | null;
+  participantStatus?: string | null;
 }): boolean {
   if (!input.isAuthenticated) {
     return false;
   }
 
-  if (input.meetingStatus && ['cancelled', 'ended'].includes(String(input.meetingStatus).toLowerCase())) {
+  if (input.meetingStatus && !isJoinableMeetingStatus(input.meetingStatus)) {
+    return false;
+  }
+
+  if (input.participantStatus && ['left', 'removed'].includes(input.participantStatus)) {
     return false;
   }
 
   return input.organizationMember && input.workspaceMember && input.participantMembership;
+}
+
+export function meetingActionForStatus(status?: string | null): 'join' | 'view' {
+  return isJoinableMeetingStatus(status) ? 'join' : 'view';
+}
+
+export function destinationForMeeting(input: {
+  id: string;
+  code?: string | null;
+  status?: string | null;
+}): string {
+  if (isJoinableMeetingStatus(input.status) && isValidMeetingCode(input.code ?? '')) {
+    return meetingJoinPath(input.code as string);
+  }
+
+  return meetingDetailsPath(input.id);
 }

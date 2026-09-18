@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarDays, Check, Clock3, Copy, Link2, Video } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { createScheduledMeeting } from '../lib/data-access';
-import { generateMeetingCode, normalizeMeetingCode } from '../lib/meeting-utils';
+import { getUserOrganizationContext, schedulePersistentMeeting } from '../lib/data-access';
+import { meetingJoinPath } from '../lib/meeting-utils';
 
 export default function ScheduleMeeting() {
   const navigate = useNavigate();
@@ -26,16 +26,17 @@ export default function ScheduleMeeting() {
       setSaving(true);
       setSaveError(null);
 
-      const nextCode = normalizeMeetingCode(meetingCode || generateMeetingCode());
-      const meetingEntry = await createScheduledMeeting({
+      const context = await getUserOrganizationContext(user.id);
+      const meetingEntry = await schedulePersistentMeeting({
         title: title.trim(),
         date,
         time,
-        hostId: user.id,
-        code: nextCode,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        workspaceId: context?.workspace_id,
       });
+      const nextCode = meetingEntry.meeting_code ?? '';
 
-      const generatedLink = `${window.location.origin}${window.location.pathname}#/meet?code=${encodeURIComponent(meetingEntry?.meeting_code ?? nextCode)}`;
+      const generatedLink = `${window.location.origin}${window.location.pathname}#${meetingJoinPath(nextCode)}`;
 
       setMeetingCode(nextCode);
       setShareLink(generatedLink);
@@ -170,7 +171,7 @@ export default function ScheduleMeeting() {
                     )}
                   </button>
                   <button
-                    onClick={() => navigate(`/meet?code=${encodeURIComponent(normalizeMeetingCode(meetingCode))}`)}
+                    onClick={() => navigate(meetingJoinPath(meetingCode))}
                     className="btn-primary"
                   >
                     Open meeting

@@ -53,23 +53,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const { error: insertError } = await supabase
-        .from('users')
-        .upsert(
-          {
-            id: authUser.id,
-            email: authUser.email ?? '',
-            full_name: fallbackUser.full_name,
-            created_at: new Date().toISOString(),
-          },
-          { onConflict: 'id' },
-        );
+      const { error: contextError } = await supabase.rpc('ensure_user_profile_context', {
+        p_user_id: authUser.id,
+        p_email: authUser.email ?? '',
+        p_full_name: fallbackUser.full_name,
+      });
 
-      if (insertError && insertError.code !== '42P01') {
-        console.error('Failed to provision user profile', insertError);
+      if (contextError && contextError.code !== '42P01') {
+        console.error('Failed to provision user organization context', contextError);
       }
 
-      setUser(fallbackUser);
+      const { data: provisionedProfile } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUser.id)
+        .maybeSingle();
+
+      setUser((provisionedProfile as User | null) ?? fallbackUser);
     } catch (error) {
       console.error('User provisioning failed', error);
       setUser(fallbackUser);

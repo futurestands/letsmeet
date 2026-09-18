@@ -2,8 +2,8 @@
 import { useNavigate } from 'react-router-dom';
 import { Video, Calendar, Users, Shield, Zap, MessageSquare, Monitor, Hand, Smile, Play, Mic, Camera, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { createMeetingRecord, listScheduledMeetingsForUser } from '../lib/data-access';
-import { generateMeetingCode, normalizeMeetingCode } from '../lib/meeting-utils';
+import { createPersistentMeeting, getUserOrganizationContext, listMeetingsForUser, listScheduledMeetingsForUser, type UserOrganizationContext } from '../lib/data-access';
+import { destinationForMeeting, meetingJoinPath, meetingRoomPath, normalizeMeetingCode } from '../lib/meeting-utils';
 
 interface ScheduledMeetingSummary {
   title: string;
@@ -18,7 +18,12 @@ export default function Home() {
   const [meetingCode, setMeetingCode] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [scheduledMeetings, setScheduledMeetings] = useState<ScheduledMeetingSummary[]>([]);
+  const [recentMeetings, setRecentMeetings] = useState<{ id: string; code: string; title: string; status?: string | null }[]>([]);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [tenant, setTenant] = useState<UserOrganizationContext | null>(null);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -33,8 +38,16 @@ export default function Home() {
       }
 
       try {
-        const rows = await listScheduledMeetingsForUser(user.id);
+        const [rows, meetings, context] = await Promise.all([
+          listScheduledMeetingsForUser(),
+          listMeetingsForUser(),
+          getUserOrganizationContext(user.id),
+        ]);
         if (!active) return;
+
+        setWorkspaceId(context?.workspace_id ?? null);
+        setTenant(context);
+        setRecentMeetings(meetings.slice(0, 6));
 
         setScheduledMeetings(
           rows.map((row) => ({
@@ -64,23 +77,23 @@ export default function Home() {
   }, [user?.id]);
 
   const start = async () => {
-    if (!user?.id) return;
-
-    const nextCode = normalizeMeetingCode(generateMeetingCode());
-    await createMeetingRecord({
-      title: 'New meeting',
-      hostId: user.id,
-      code: nextCode,
-      status: 'live',
-    });
-
-    navigate(`/meet?mode=new&code=${encodeURIComponent(nextCode)}`);
+    if (!user?.id || starting) return;
+    try {
+      setStarting(true);
+      setActionError(null);
+      const meeting = await createPersistentMeeting('New meeting', workspaceId);
+      navigate(meetingRoomPath(meeting.code));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to start the meeting.');
+    } finally {
+      setStarting(false);
+    }
   };
 
   const join = () => {
     const normalizedCode = normalizeMeetingCode(meetingCode);
     if (normalizedCode !== 'LM-INVALID') {
-      navigate(`/meet?mode=join&code=${encodeURIComponent(normalizedCode)}`);
+      navigate(meetingJoinPath(normalizedCode));
     }
   };
   return (
@@ -93,7 +106,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => setShowJoinModal(true)} className="btn-secondary text-sm">Join</button>
-            <button onClick={start} className="btn-primary text-sm">Start Meeting</button>
+            <button onClick={start} disabled={starting} className="btn-primary text-sm disabled:cursor-wait disabled:opacity-60">{starting ? 'Creating...' : 'Start Meeting'}</button>
             {user && (<div className="relative group"><button className="w-9 h-9 bg-[#1a73e8] rounded-full flex items-center justify-center text-white font-semibold text-sm">{user.full_name?.charAt(0).toUpperCase()||'U'}</button><div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-lg border border-gray-100 py-2 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all"><div className="px-4 py-2 border-b border-gray-100"><p className="text-sm font-medium truncate">{user.full_name}</p><p className="text-xs text-gray-500 truncate">{user.email}</p></div><button onClick={() => navigate('/settings')} className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50">Settings</button><button onClick={signOut} className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><LogOut className="w-4 h-4"/>Sign Out</button></div></div>)}
           </div>
         </div>
@@ -104,8 +117,11 @@ export default function Home() {
             <div className="inline-flex items-center gap-2 bg-[#e8f0fe] text-[#1a73e8] px-4 py-2 rounded-full text-sm font-medium"><Zap className="w-4 h-4"/>Built for team-first collaboration</div>
             <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">Video meetings, <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#1a73e8] to-[#6c63ff]">reimagined</span></h1>
             <p className="text-lg text-gray-600 max-w-lg">Secure, tenant-aware conferencing for organizations and workspaces.</p>
+            {tenant && (
+              <p className="text-sm text-slate-500">Current workspace: <span className="font-semibold text-slate-700">{tenant.organization_name} · {tenant.workspace_name ?? 'Default workspace'}</span></p>
+            )}
             <div className="flex gap-4">
-              <button onClick={start} className="btn-primary flex items-center gap-2 px-8 py-3.5"><Play className="w-5 h-5"/>Start a meeting</button>
+              <button onClick={start} disabled={starting} className="btn-primary flex items-center gap-2 px-8 py-3.5 disabled:cursor-wait disabled:opacity-60"><Play className="w-5 h-5"/>{starting ? 'Creating...' : 'Start a meeting'}</button>
               <button onClick={() => navigate('/schedule')} className="btn-secondary flex items-center gap-2 px-8 py-3.5"><Calendar className="w-5 h-5"/>Schedule</button>
             </div>
           </div>
@@ -137,6 +153,17 @@ export default function Home() {
           </div>
         </div>
       </section>
+      {actionError && <div className="mx-auto max-w-7xl px-6"><div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{actionError}</div></div>}
+      {recentMeetings.length > 0 && (
+        <section className="px-6 pt-8">
+          <div className="mx-auto max-w-7xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-center justify-between"><h2 className="text-2xl font-bold text-gray-900">Recent meetings</h2><button onClick={() => navigate('/meetings')} className="text-sm font-semibold text-blue-700">View all</button></div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {recentMeetings.map((meeting) => <button key={meeting.id} onClick={() => navigate(destinationForMeeting(meeting))} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{meeting.status}</p><h3 className="mt-2 font-semibold text-slate-900">{meeting.title}</h3><p className="mt-1 text-sm text-blue-700">{meeting.code}</p></button>)}
+            </div>
+          </div>
+        </section>
+      )}
       {!loadingMeetings && scheduledMeetings.length > 0 && (
         <section className="px-6 pt-8">
           <div className="max-w-7xl mx-auto">
@@ -151,7 +178,9 @@ export default function Home() {
                 {scheduledMeetings.map((meeting) => (
                   <button
                     key={`${meeting.meeting_code ?? meeting.title}-${meeting.date}-${meeting.time}`}
-                    onClick={() => navigate(`/meet?code=${encodeURIComponent(meeting.meeting_code ?? meeting.title)}`)}
+                    onClick={() => meeting.meeting_code
+                      ? navigate(meetingJoinPath(meeting.meeting_code))
+                      : navigate('/meetings')}
                     className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50"
                   >
                     <p className="text-sm font-medium text-slate-500">{meeting.date}</p>

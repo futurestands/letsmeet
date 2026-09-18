@@ -2,23 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   canAccessMeeting,
   canIssueLiveKitToken,
-  generateMeetingCode,
+  destinationForMeeting,
+  isJoinableMeetingStatus,
+  isPastMeetingStatus,
   isUserMemberOfOrganization,
   isUserMemberOfWorkspace,
+  isValidMeetingCode,
+  isValidMeetingTransition,
+  meetingActionForStatus,
+  meetingDetailsPath,
+  meetingJoinPath,
+  meetingRoomPath,
   normalizeMeetingCode,
   resolveParticipantRole,
 } from './meeting-utils';
 
 describe('meeting utilities', () => {
-  it('creates a valid human-friendly meeting code', () => {
-    const code = generateMeetingCode();
-
-    expect(code).toMatch(/^LM-[A-Z0-9]{6}$/);
-  });
-
   it('normalizes and validates a meeting code input', () => {
     expect(normalizeMeetingCode(' lets-meet-abc123 ')).toBe('LM-ABC123');
     expect(normalizeMeetingCode('abc')).toBe('LM-INVALID');
+    expect(isValidMeetingCode('LM-ABC234')).toBe(true);
+    expect(isValidMeetingCode('LM-INVALID')).toBe(false);
+  });
+
+  it('builds refresh-safe meeting routes', () => {
+    expect(meetingRoomPath('abc234')).toBe('/meet/LM-ABC234');
+    expect(meetingJoinPath('LM-ABC234')).toBe('/join/LM-ABC234');
+    expect(meetingDetailsPath('meeting-1')).toBe('/meetings/meeting-1');
+    expect(destinationForMeeting({ id: 'meeting-1', code: 'LM-ABC234', status: 'live' })).toBe('/join/LM-ABC234');
+    expect(destinationForMeeting({ id: 'meeting-1', code: 'LM-ABC234', status: 'ended' })).toBe('/meetings/meeting-1');
+    expect(meetingActionForStatus('waiting')).toBe('join');
+    expect(meetingActionForStatus('cancelled')).toBe('view');
   });
 
   it('authorizes active organization membership', () => {
@@ -85,6 +99,7 @@ describe('meeting utilities', () => {
         workspaceMember: true,
         participantMembership: true,
         meetingStatus: 'live',
+        participantStatus: 'joined',
       }),
     ).toBe(true);
 
@@ -95,6 +110,17 @@ describe('meeting utilities', () => {
         workspaceMember: false,
         participantMembership: true,
         meetingStatus: 'live',
+      }),
+    ).toBe(false);
+
+    expect(
+      canIssueLiveKitToken({
+        isAuthenticated: true,
+        organizationMember: true,
+        workspaceMember: true,
+        participantMembership: true,
+        meetingStatus: 'live',
+        participantStatus: 'left',
       }),
     ).toBe(false);
   });
@@ -128,5 +154,17 @@ describe('meeting utilities', () => {
         meetingStatus: 'live',
       }),
     ).toBe(false);
+  });
+
+  it('models the authoritative meeting lifecycle', () => {
+    expect(isJoinableMeetingStatus('scheduled')).toBe(true);
+    expect(isJoinableMeetingStatus('ended')).toBe(false);
+    expect(isPastMeetingStatus('cancelled')).toBe(true);
+    expect(isValidMeetingTransition('scheduled', 'waiting')).toBe(true);
+    expect(isValidMeetingTransition('waiting', 'live')).toBe(true);
+    expect(isValidMeetingTransition('live', 'ended')).toBe(true);
+    expect(isValidMeetingTransition('ended', 'live')).toBe(false);
+    expect(isValidMeetingTransition('cancelled', 'live')).toBe(false);
+    expect(isValidMeetingTransition('scheduled', 'live')).toBe(false);
   });
 });
