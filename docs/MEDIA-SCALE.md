@@ -2,47 +2,57 @@
 
 This document is an engineering assessment. It does **not** claim 500-participant support.
 
-## Current verified capacity
+Distinguish carefully:
 
-| Stage | Evidence | Status |
+- **TOKEN API SCALE** — minting LiveKit JWTs under concurrency (auth + DB + rate limits)
+- **MEDIA / SFU SCALE** — LiveKit rooms, tracks, TURN, client CPU/GPU, packet loss
+
+Token API results are **not** media proof.
+
+## CURRENT VERIFIED
+
+| Item | Evidence |
+|---|---|
+| 2 concurrent human browsers (media + collab) | Playwright dual-context staging gate |
+| Selective camera subscribe + page size 16 | `ParticipantGrid` |
+| `adaptiveStream` / `dynacast` / `simulcast` | `ConferenceRoom` LiveKit room options |
+| Active-speaker priority in gallery order | Unit + grid sort |
+| Token multi-bucket rate limit | `server/rate-limit.mjs` + policy unit test (120 distinct users / room / min) |
+| Token warm serial latency | Staging 2026-09-18: p50 ≈1092 ms · p95 ≈1340 ms |
+| Token same-user concurrency | 10 → 100%; ≥25 → 20×200 then user-room 429s (intentional) |
+
+## CURRENT UNVERIFIED
+
+| Item | Status |
+|---|---|
+| LiveKit media soak at 10 / 25 / 50 / 100 / 250 | NOT TESTED |
+| TURN path under lossy networks | NOT TESTED |
+| Client CPU/memory at ≥25 video tiles | NOT TESTED |
+| Distinct-user token storm at 50–100 on staging Render | NOT TESTED (only two staging identities) |
+| 500 participants | NOT SUPPORTED |
+
+## Scale expectations (architecture judgment, not soak evidence)
+
+| Participants | TOKEN API SCALE | MEDIA / SFU SCALE |
 |---|---|---|
-| 2 concurrent human browsers | Playwright dual-context staging conference gate | VERIFIED |
-| Token API warm path | Structured duration logs; typically ~1–2s including auth | PARTIALLY VERIFIED |
-| Token API 10 concurrent authenticated | Historical probe ~100% when not rate-limited | PARTIALLY VERIFIED |
-| Token API 25–250 concurrent | Multi-bucket limiter returns principled 429; see `docs/RATE-LIMIT.md` | VERIFIED (limiter) / NOT a media proof |
-| LiveKit media soak 10–250 | Not executed with LiveKit load agents in this pass | NOT TESTED |
-| 500 participants | No evidence | NOT SUPPORTED |
+| **10** | Comfortable under policy (≤120 distinct users/room/min) | Expected OK with full gallery + adaptive stream |
+| **25** | Distinct users OK; **same user** capped at 20/user-room/min | Expected OK with pagination |
+| **50** | Distinct users OK within room 120/min burst | Expected OK if selective subscribe holds; needs soak |
+| **100** | Near room burst ceiling; may need staggered joins | UNVERIFIED — SFU + client risk rises |
+| **250** | Token API alone insufficient; edge/WAF + capacity plan | UNVERIFIED — requires load agents |
+| **500** | NOT SUPPORTED | NOT SUPPORTED |
 
-## Tested capacity
+## Architecture levers present
 
-- Dual-browser media: 2
-- Token concurrency: policy-tested locally; staging soak numbers remain from prior probes under the old limiter
-
-## Expected bottlenecks
-
-1. Browser DOM / video element count without pagination (mitigated: page size 16 + selective subscribe)
-2. Full remote track subscription (mitigated: unsubscribe off-page cameras; keep screen share subscribed)
-3. Token mint latency: Supabase `getUser` + meeting authorization queries (mitigated: parallel membership lookups)
-4. Render cold starts on free tiers
-5. Realtime fan-out for chat / polls / Q&A / notes
-6. SFU region, TURN, and uplink bandwidth (provider-dependent)
-7. Recording egress + object storage (PROVIDER REQUIRED)
-
-## 500-participant requirements (not claimed)
-
-1. LiveKit-compatible load generator ramp: 10 → 25 → 50 → 100 → 250 → controlled 500
-2. Dedicated staging LiveKit capacity / region plan
-3. Horizontal token API + connection storm protection at the edge
-4. Gallery pagination + speaker/stage layout only (already foundational)
-5. Simulcast + dynacast + adaptiveStream enabled (already present in conference connect)
-6. Documented packet loss / CPU / memory budgets per stage
-7. Separate soak for Realtime collaboration channels
+- LiveKit `adaptiveStream`, `dynacast`, `simulcast`
+- Paginated tiles (16) + unsubscribe off-page cameras
+- Screen share prioritized above gallery
+- Parallelized token authorization DB lookups
+- Multi-bucket rate limits (see `docs/RATE-LIMIT.md`)
 
 ## Load-test strategy
 
-Prefer LiveKit CLI / server SDK agents publishing muted tracks over 500 GUI browsers.
-
-Harness notes live in `scripts/media-scale-harness.md` (procedure) — execution requires LiveKit admin credentials and is **NOT TESTED** until operators run it.
+See `scripts/media-scale-harness.md`. Prefer LiveKit agents over 500 GUI browsers.
 
 ## Decision
 

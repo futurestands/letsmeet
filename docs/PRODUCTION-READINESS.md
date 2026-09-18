@@ -1,74 +1,71 @@
 # LeTsMeet Production Readiness Matrix
 
-Last updated against branch `phase-1-saas-foundation`.
+Last updated against branch `phase-1-saas-foundation` (staging only).
 
-Status vocabulary:
+Status vocabulary (use only these):
 
-- **VERIFIED** — exercised with evidence in staging
-- **PARTIALLY VERIFIED** — architecture + some automated evidence; gaps remain
-- **MANUAL REQUIRED** — cannot be fully proven by current automation
-- **PROVIDER REQUIRED** — waits on external credentials/services
-- **NOT TESTED** — no credible evidence yet
-- **NOT SUPPORTED** — explicitly out of scope or unclaimed
+- **VERIFIED**
+- **PARTIALLY VERIFIED**
+- **MANUAL REQUIRED**
+- **PROVIDER REQUIRED**
+- **NOT TESTED**
+- **NOT SUPPORTED**
 
 | Capability | Status | Evidence / notes |
 |---|---|---|
-| Authentication | VERIFIED | Staging sign-in in dual-browser Playwright |
-| Tenant isolation | VERIFIED | Phase 2–6 DB suites + invitation outsider checks |
-| Meetings lifecycle | VERIFIED | Create/start/join/end + cancelled/ended denials |
-| LiveKit token auth | VERIFIED | Endpoint suites + dual-browser join |
-| Two-way video | VERIFIED | Dual-browser Playwright |
-| Two-way audio (technical) | VERIFIED | Mic publish + remote tiles + `RoomAudioRenderer` |
-| Human-ear audio | MANUAL REQUIRED | See `docs/MANUAL-AUDIO.md` |
-| Active speaker | PARTIALLY VERIFIED | Synthetic harness + speaker-priority tile ordering |
-| Screen share | MANUAL REQUIRED | Implementation real; see `docs/SCREEN-SHARE.md` |
-| Host mute-other | VERIFIED | Dual-browser UI |
-| Host remove-other | VERIFIED | Dual-browser UI + subsequent token 403 |
-| Reconnect | VERIFIED | Playwright `setOffline` restore path |
-| Scheduling | VERIFIED | RPC + schedule UI invitation E2E |
-| Invitations | VERIFIED | Dual-browser + staging invitation harness |
-| Chat | VERIFIED | Dual-browser bidirectional |
-| Reactions | PARTIALLY VERIFIED | Reliable data channel + Realtime publication |
-| Hand raise | VERIFIED | Dual-browser |
+| Authentication | VERIFIED | Staging sign-in; dual-browser Playwright |
+| Tenant Security | VERIFIED | Phase 2–6 DB suites + invitation outsider denial |
+| Meetings | VERIFIED | Create/start/join/end; cancelled/ended denials |
+| LiveKit | VERIFIED | Token + moderation + dual-browser join |
+| Video | VERIFIED | Dual-browser two-way video |
+| Audio | PARTIALLY VERIFIED | Technical path VERIFIED; human-ear MANUAL REQUIRED |
+| Active Speaker | PARTIALLY VERIFIED | Priority ordering + synthetic harness; live badges flaky with fake media |
+| Moderation | VERIFIED | Host mute-other / remove-other + token 403 |
+| Reconnection | VERIFIED | Playwright offline restore |
+| Screen Share | MANUAL REQUIRED | Implementation real; capture not automatable safely |
+| Scheduling | VERIFIED | RPC + invitation E2E |
+| Invitations | VERIFIED | Staging invitation harness |
+| Chat | VERIFIED | Dual-browser |
+| Reactions | PARTIALLY VERIFIED | Reliable data + Realtime |
+| Hand Raise | VERIFIED | Dual-browser |
 | Polls | VERIFIED | Dual-browser |
 | Q&A | VERIFIED | Dual-browser |
-| Shared notes | VERIFIED | Dual-browser + stale-version rejection |
-| Whiteboard | PARTIALLY VERIFIED | Append-only ops verified; **not CRDT** |
-| Recording | PROVIDER REQUIRED | Queued without egress + object storage |
-| Transcription | PROVIDER REQUIRED | Worker skips without provider; never fabricates text |
-| AI | PROVIDER REQUIRED | Worker skips without provider; auth inherits meeting access |
-| Organizations UI | PARTIALLY VERIFIED | Owner/member browser + RPC matrix for admin/guest invites |
-| Notifications email/SMS | PROVIDER REQUIRED | Dispatcher + retries; stay pending without provider |
-| In-app notifications | PARTIALLY VERIFIED | Persisted + Settings UI |
-| Accessibility | PARTIALLY VERIFIED | See `docs/ACCESSIBILITY.md` — not WCAG certification |
-| Responsive | VERIFIED | 390 / 768 / 1280 Playwright |
-| Observability | PARTIALLY VERIFIED | `/health` `/ready` + structured request logs |
-| Rate limiting | VERIFIED | Multi-bucket policy; `docs/RATE-LIMIT.md` |
-| Load testing (token) | PARTIALLY VERIFIED | Policy tests + prior concurrency probes |
-| Media load 10–250 | NOT TESTED | Harness documented; not executed this pass |
-| 500 participants | NOT SUPPORTED | See `docs/MEDIA-SCALE.md` |
-| Security regression | VERIFIED | Phase 2–6 + LiveKit endpoint + invitation harness |
-| Backups | NOT TESTED | Supabase project ops outside app repo |
-| CI/CD | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/rate-limit/notification tests |
-| Secret scanning | VERIFIED | Tracked files placeholders only |
+| Notes | VERIFIED | Dual-browser + optimistic locking |
+| Whiteboard | PARTIALLY VERIFIED | Append-only; not CRDT |
+| Recording | PROVIDER REQUIRED | Stays queued without egress + storage |
+| Notifications | PROVIDER REQUIRED | Email/SMS pending; in-app PARTIALLY VERIFIED |
+| Transcription | PROVIDER REQUIRED | Queued/unconfigured; never fabricated |
+| AI | PROVIDER REQUIRED | Queued/unconfigured; meeting auth inherited |
+| Organizations | PARTIALLY VERIFIED | Owner/member UI + RPC admin/guest invite matrix |
+| Accessibility | PARTIALLY VERIFIED | Keyboard smoke; screen-reader MANUAL REQUIRED |
+| Responsive | VERIFIED | 390 / 768 / 1280 |
+| API | VERIFIED | Staging Render `/health` `/ready` + token auth |
+| Database | VERIFIED | Staging migrations **001–014**; security suites |
+| Rate Limiting | VERIFIED | Multi-bucket policy; see `docs/RATE-LIMIT.md` |
+| Observability | PARTIALLY VERIFIED | Structured logs + readiness dependencies |
+| CI | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/policy tests; Windows DB suites local |
+| Media Scale | NOT TESTED | Token ≠ media; see `docs/MEDIA-SCALE.md` |
+| 500 Participants | NOT SUPPORTED | No media evidence |
 
-## Staging projects
+## Staging
 
-- Staging Supabase: `uasslvisjnwhdhcgqwyc`
-- Production Supabase: `wvmmofornwivfsjeqmda` (must remain untouched from this branch)
-- Feature branch only: `phase-1-saas-foundation`
-- `main` must remain untouched until an explicit production cutover
+- Supabase staging: `uasslvisjnwhdhcgqwyc` (linked CLI target)
+- Production Supabase: `wvmmofornwivfsjeqmda` — **untouched**
+- Branch: `phase-1-saas-foundation` only; **main untouched**
 
 ## Provider checklist (do not invent credentials)
 
-1. `NOTIFICATION_EMAIL_PROVIDER` + API key + from (optional webhook URL for `http`)
-2. SMS provider env (adapter intentionally disabled until vendor chosen)
-3. LiveKit Egress + `RECORDING_STORAGE_*`
-4. `TRANSCRIPTION_PROVIDER` + `TRANSCRIPTION_API_KEY`
-5. `AI_PROVIDER` + `AI_API_KEY`
+| Provider | Staging status |
+|---|---|
+| Email | PROVIDER REQUIRED (`emailConfigured: false`) |
+| SMS | PROVIDER REQUIRED |
+| LiveKit Egress + object storage | PROVIDER REQUIRED (`storageConfigured: false`) |
+| Transcription | PROVIDER REQUIRED |
+| AI | PROVIDER REQUIRED |
 
-Until configured, jobs must remain queued/unconfigured and UI must not claim completion.
+Jobs must remain pending/queued/unconfigured until a real provider accepts them.
 
-## Migration note
+## Migrations
 
-Migration `014_provider_queue_indexes.sql` is in the repo. Staging application requires a **staging** `DATABASE_URL` (`uasslvisjnwhdhcgqwyc`). Local `.env.local` currently points at production Postgres and must **not** be used to apply migrations from this branch.
+Staging linked project `uasslvisjnwhdhcgqwyc` has migrations **001–014** applied via Supabase CLI (`supabase db push --linked`).  
+Never apply from production-oriented `.env.local` (`wvmmofornwivfsjeqmda`).

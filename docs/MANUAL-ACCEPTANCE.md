@@ -1,0 +1,117 @@
+# Manual acceptance gates
+
+Automated suites cannot prove perception, capture, or full SR coverage.  
+**RESULT** and **STATUS** below are left blank until a human runs each test.
+
+Status vocabulary: `PASS` | `FAIL` | `NOT RUN`
+
+---
+
+## TEST: Human-ear two-way audio
+
+**STEPS**
+1. Host and participant join the same staging meeting on two devices/browsers.
+2. Host speaks; participant listens with headphones.
+3. Participant speaks; host listens.
+4. Mute/unmute both sides; host mute-other once.
+5. Change input device if available; briefly interrupt network and reconnect.
+
+**EXPECTED RESULT**
+Clear two-way speech both directions; mute stops audio; reconnect restores hearing without auth bypass or blank UI.
+
+**RESULT:** _(not run in automation)_
+
+**STATUS:** NOT RUN
+
+---
+
+## TEST: Real screen sharing
+
+**STEPS**
+1. Host starts screen/window share of a known visual.
+2. Participant confirms the share stage shows the correct content.
+3. Host stops share.
+4. Confirm camera tiles restore for both sides.
+
+**EXPECTED RESULT**
+Participant sees real shared pixels; stop share restores gallery; no fake capture.
+
+**RESULT:** _(not run — automated capture unavailable)_
+
+**STATUS:** NOT RUN
+
+---
+
+## TEST: Admin browser account
+
+**STEPS**
+1. Sign in as an organization **admin** (not owner).
+2. Open Settings: confirm allowed admin actions work.
+3. Attempt owner-only operations (e.g. destructive ownership changes if exposed).
+4. Bypass UI and call restricted RPCs; confirm backend rejection where required.
+
+**EXPECTED RESULT**
+Admin can administer allowed surfaces; owner-only paths fail server-side.
+
+**RESULT:** _(no dedicated staging admin browser identity)_
+
+**STATUS:** NOT RUN
+
+---
+
+## TEST: Guest browser account
+
+**STEPS**
+1. Sign in (or join) as meeting **guest** without org membership.
+2. Confirm meeting media/collaboration access when invited.
+3. Open org Settings / member invite / audit / retention.
+4. Attempt org RPCs; confirm denial and no accidental membership.
+
+**EXPECTED RESULT**
+Guest can attend invited meeting only; no org administration; membership unchanged.
+
+**RESULT:** _(RPC invite matrix covers guest invite pending; dedicated guest browser account NOT RUN)_
+
+**STATUS:** NOT RUN
+
+---
+
+## TEST: Screen-reader accessibility smoke
+
+**STEPS**
+1. With NVDA or VoiceOver, sign in, open schedule, open settings, join a meeting.
+2. Tab through meeting controls, chat, and collaboration panel.
+3. Trigger an error (e.g. bad join) and confirm it is announced or focus-moved.
+
+**EXPECTED RESULT**
+Controls have names; focus is usable; no silent critical failures.  
+Not a WCAG certification.
+
+**RESULT:** _(not run)_
+
+**STATUS:** NOT RUN
+
+---
+
+## TEST: Large media soak
+
+**STEPS**
+1. Follow `scripts/media-scale-harness.md` with LiveKit load agents.
+2. Ramp 10 → 25 → 50 → 100 → 250.
+3. Record join success, latency, CPU, packet loss, reconnects.
+
+**EXPECTED RESULT**
+Documented metrics per stage; no claim of 500 without evidence.
+
+**RESULT:** _(not run)_
+
+**STATUS:** NOT RUN
+
+---
+
+## Related docs
+
+- `docs/MANUAL-AUDIO.md`
+- `docs/SCREEN-SHARE.md`
+- `docs/ACCESSIBILITY.md`
+- `docs/MEDIA-SCALE.md`
