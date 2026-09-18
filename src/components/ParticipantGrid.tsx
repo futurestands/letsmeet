@@ -96,7 +96,7 @@ const ParticipantGrid = memo(function ParticipantGrid({
                 )}
               </div>
               {canModerate && !participant.isLocal && !isHost && (
-                <div className="absolute right-3 top-3 flex gap-2 opacity-0 transition group-focus-within:opacity-100 group-hover:opacity-100">
+                <div className="absolute right-3 top-3 flex gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                   <button
                     onClick={() => onModerate(identity, 'mute')}
                     className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950/85 text-white focus:outline-none focus:ring-2 focus:ring-blue-400"

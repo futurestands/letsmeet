@@ -286,7 +286,7 @@ function ConferenceExperience({
   const connectionMessage = connectionStatusMessage(connection);
 
   return (
-    <div className="relative flex h-dvh min-h-[38rem] flex-col overflow-hidden bg-slate-950 text-white" data-lk-theme="default">
+    <div className="relative flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-950 text-white" data-lk-theme="default">
       <RoomAudioRenderer />
       <StartAudio label="Enable meeting audio" className="absolute left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-xl" />
 
@@ -347,7 +347,7 @@ function ConferenceExperience({
         <button onClick={() => void toggleScreenShare()} className={`meeting-control ${isScreenShareEnabled ? 'meeting-control-active' : ''}`} aria-label={isScreenShareEnabled ? 'Stop screen sharing' : 'Share screen'} title={isScreenShareEnabled ? 'Stop sharing' : 'Share screen'}>
           <MonitorUp />
         </button>
-        <button onClick={() => selectPanel(panel === 'participants' ? null : 'participants')} className={`meeting-control hidden sm:flex ${panel === 'participants' ? 'meeting-control-active' : ''}`} aria-label="Toggle participants" title="Participants">
+        <button onClick={() => selectPanel(panel === 'participants' ? null : 'participants')} className={`meeting-control ${panel === 'participants' ? 'meeting-control-active' : ''}`} aria-label="Toggle participants" title="Participants">
           <Users />
         </button>
         <button onClick={() => selectPanel(panel === 'chat' ? null : 'chat')} className={`meeting-control relative ${panel === 'chat' ? 'meeting-control-active' : ''}`} aria-label="Toggle meeting chat" title="Chat">
