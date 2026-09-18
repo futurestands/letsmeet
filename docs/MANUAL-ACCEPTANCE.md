@@ -36,9 +36,26 @@ Clear two-way speech both directions; mute stops audio; reconnect restores heari
 **EXPECTED RESULT**
 Participant sees real shared pixels; stop share restores gallery; no fake capture.
 
-**RESULT:** _(not run — automated capture unavailable)_
+**RESULT:** Automation covers control path + remote “is presenting” when Chromium fake capture works (`npm run test:e2e:screen`). Real OS window pixels remain human-verified.
 
-**STATUS:** NOT RUN
+**STATUS:** PARTIAL — automated when capture available; OS capture NOT RUN
+
+---
+
+## TEST: Host meeting moderation (browser)
+
+**STEPS**
+1. Host creates/starts meeting; participant joins.
+2. Host locks then unlocks meeting.
+3. Host mutes participant; host removes participant.
+4. Host ends meeting for everyone.
+
+**EXPECTED RESULT**
+UI + LiveKit moderation remain authoritative after refresh/reconnect; removed participant cannot mint a new token.
+
+**RESULT:** Covered by `npm run test:e2e:admin` on staging (in addition to dual-browser mute/remove).
+
+**STATUS:** STAGING VERIFIED (automated)
 
 ---
 

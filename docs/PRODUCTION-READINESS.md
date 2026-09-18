@@ -22,7 +22,7 @@ Status vocabulary (use only these):
 | Active Speaker | PARTIALLY VERIFIED | Priority ordering + synthetic harness; live badges flaky with fake media |
 | Moderation | VERIFIED | Host mute-other / remove-other + token 403 |
 | Reconnection | VERIFIED | Playwright offline restore |
-| Screen Share | MANUAL REQUIRED | Implementation real; capture not automatable safely |
+| Screen Share | PARTIALLY VERIFIED | Control path + fake-capture E2E when available; OS capture MANUAL REQUIRED |
 | Scheduling | VERIFIED | RPC + invitation E2E |
 | Invitations | VERIFIED | Staging invitation harness |
 | Chat | VERIFIED | Dual-browser |
@@ -37,16 +37,16 @@ Status vocabulary (use only these):
 | Transcription | PROVIDER REQUIRED | Queued/unconfigured; never fabricated |
 | AI | PROVIDER REQUIRED | Queued/unconfigured; meeting auth inherited |
 | Organizations | PARTIALLY VERIFIED | Owner/member UI + RPC admin/guest invite matrix |
-| Accessibility | PARTIALLY VERIFIED | Keyboard smoke; screen-reader MANUAL REQUIRED |
+| Accessibility | PARTIALLY VERIFIED | Keyboard smoke + Escape overlay close; screen-reader MANUAL REQUIRED |
 | Responsive | VERIFIED | 390 / 768 / 1280 |
 | API | VERIFIED | Staging Render `/health` `/ready` + token auth; Server-Timing phases |
 | Database | VERIFIED | Staging migrations **001–016**; security suites |
 | Guest share-link join | VERIFIED | Unauthenticated guest E2E + security matrix; no org/workspace membership |
 | Rate Limiting | VERIFIED | Multi-bucket policy unchanged; see `docs/RATE-LIMIT.md` |
-| Observability | PARTIALLY VERIFIED | Structured logs + Server-Timing on token mint |
+| Observability | PARTIALLY VERIFIED | Structured logs + Server-Timing + `/api/livekit/metrics` aggregates |
 | CI | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/policy tests; Windows DB suites local |
-| Media Scale | NOT TESTED | Token ≠ media; see `docs/MEDIA-SCALE.md` |
-| 500 Participants | NOT SUPPORTED | No media evidence |
+| Media Scale | PARTIALLY VERIFIED | Gallery page 16 + selective subscribe + pin/quality IMPLEMENTED; soak NOT TESTED |
+| 500 Participants | NOT SUPPORTED | No media soak evidence — see `docs/MEDIA-SCALE.md` |
 | Token API latency | PARTIALLY VERIFIED | Overlap auth+meeting reduced 10-concurrent client p50 ~5147→~1683 ms; Auth `getUser` remains dominant |
 
 ## Staging

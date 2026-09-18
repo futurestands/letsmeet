@@ -71,3 +71,14 @@ Meeting `LM-YUZX55` via `npm run test:token-perf`:
 ## Remaining bottleneck
 
 Without a staging `SUPABASE_JWT_SECRET` for local JWT verification, every mint still depends on remote Auth `getUser`. Next infrastructure option: configure JWT secret on Render and verify locally, then keep meeting/participant PostgREST (or a single SECURITY DEFINER RPC). Do not cache authorization across removes/revokes.
+
+## Horizontal scaling / distributed limits (documented, not yet implemented)
+
+| Need | Why | Status |
+|---|---|---|
+| Multiple Render/Railway instances | Single Node process ceiling under join storms | NOT YET SUPPORTED in staging topology |
+| Redis (or equivalent) shared rate-limit buckets | In-memory Maps do not coordinate across instances | NOT YET SUPPORTED — keep current numeric policy when added |
+| Local JWT verify with verified JWKS/secret | Cut `getUser` RTT without weakening auth | NOT SAFE TO IMPLEMENT until secret/JWKS is configured and verified on staging |
+| Aggregate metrics | Ops visibility without secrets | IMPLEMENTED — `GET /api/livekit/metrics` |
+
+Do **not** raise `user-room 20/min` or `room 120/min` to green benchmarks.
