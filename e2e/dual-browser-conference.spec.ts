@@ -23,6 +23,8 @@ test.beforeAll(async () => {
 });
 
 test('dual-browser staging conference gate', async ({ browser }) => {
+  // Staging join + collab + reconnect routinely exceeds Playwright's 180s default under Render latency.
+  test.setTimeout(300_000);
   const ids = stagingIdentities();
   const { hostContext, participantContext, hostPage, participantPage } = await launchDualBrowser(browser);
 
@@ -112,22 +114,22 @@ test('dual-browser staging conference gate', async ({ browser }) => {
     await hostPage.getByPlaceholder('Poll question').fill('Dual browser poll?');
     await hostPage.getByPlaceholder('One option per line').fill('Alpha\nBeta');
     await hostPage.getByRole('button', { name: 'Create poll' }).click();
-    await expect(hostPage.getByText('Dual browser poll?')).toBeVisible({ timeout: 20_000 });
+    await expect(hostPage.getByText('Dual browser poll?')).toBeVisible({ timeout: 45_000 });
 
     await openCollaborationTools(participantPage);
-    await expect(participantPage.getByText('Dual browser poll?')).toBeVisible({ timeout: 30_000 });
+    await expect(participantPage.getByText('Dual browser poll?')).toBeVisible({ timeout: 45_000 });
     await participantPage.getByRole('button', { name: 'Alpha', exact: true }).click();
     diagnostics.poll = 'pass';
 
     await participantPage.getByRole('button', { name: 'Q&A', exact: true }).click();
     await participantPage.getByPlaceholder('Ask a question').fill('What is the agenda?');
     await participantPage.getByPlaceholder('Ask a question').press('Enter');
-    await expect(participantPage.getByText('What is the agenda?')).toBeVisible({ timeout: 20_000 });
+    await expect(participantPage.getByText('What is the agenda?')).toBeVisible({ timeout: 45_000 });
     // Remount host tools panel so questions load even if realtime publication lagged.
     await hostPage.getByRole('button', { name: 'Toggle collaboration tools' }).click().catch(() => undefined);
     await openCollaborationTools(hostPage);
     await hostPage.getByRole('button', { name: 'Q&A', exact: true }).click();
-    await expect(hostPage.getByText('What is the agenda?')).toBeVisible({ timeout: 45_000 });
+    await expect(hostPage.getByText('What is the agenda?')).toBeVisible({ timeout: 60_000 });
     await hostPage.getByRole('button', { name: 'Mark answered' }).click();
     diagnostics.qa = 'pass';
 

@@ -39,13 +39,14 @@ Status vocabulary (use only these):
 | Organizations | PARTIALLY VERIFIED | Owner/member UI + RPC admin/guest invite matrix |
 | Accessibility | PARTIALLY VERIFIED | Keyboard smoke; screen-reader MANUAL REQUIRED |
 | Responsive | VERIFIED | 390 / 768 / 1280 |
-| API | VERIFIED | Staging Render `/health` `/ready` + token auth |
+| API | VERIFIED | Staging Render `/health` `/ready` + token auth; Server-Timing phases |
 | Database | VERIFIED | Staging migrations **001–014**; security suites |
-| Rate Limiting | VERIFIED | Multi-bucket policy; see `docs/RATE-LIMIT.md` |
-| Observability | PARTIALLY VERIFIED | Structured logs + readiness dependencies |
+| Rate Limiting | VERIFIED | Multi-bucket policy unchanged; see `docs/RATE-LIMIT.md` |
+| Observability | PARTIALLY VERIFIED | Structured logs + Server-Timing on token mint |
 | CI | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/policy tests; Windows DB suites local |
 | Media Scale | NOT TESTED | Token ≠ media; see `docs/MEDIA-SCALE.md` |
 | 500 Participants | NOT SUPPORTED | No media evidence |
+| Token API latency | PARTIALLY VERIFIED | Overlap auth+meeting reduced 10-concurrent client p50 ~5147→~1683 ms; Auth `getUser` remains dominant |
 
 ## Staging
 

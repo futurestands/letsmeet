@@ -2,13 +2,7 @@
 
 ## Problem
 
-The previous single bucket (`30 / min` keyed by `IP:Authorization`) treated a legitimate multi-user join storm like one client hammering the API. Historical probes under that policy showed roughly:
-
-- 10 concurrent → ~100% success
-- 25 concurrent → ~56% success
-- 50+ → mostly 429
-
-That was **policy collision**, not proof that 25 users cannot join.
+The previous single bucket (`30 / min` keyed by `IP:Authorization`) treated a legitimate multi-user join storm like one client hammering the API.
 
 ## Goals
 
@@ -27,42 +21,53 @@ That was **policy collision**, not proof that 25 users cannot join.
 | Authenticated room (all users) | 120 | Legitimate launch ≈2 joins/sec sustained |
 | Authenticated IP | 180 | Soft NAT / stolen-token ceiling |
 
-### Legitimate 50–100 participant join
+Limits unchanged in the performance pass. The in-memory limiter is synchronous Map bookkeeping only — it does **not** serialize async token work.
 
-- **50–100 distinct users** in one room within a minute: allowed by the **room** bucket (120), subject to auth-ip (180).
-- **One user** retrying the same room 50 times: blocked by **user-room** (20) — correct, not a launch scenario.
-- Staging probes that reuse a single host token therefore show 429 after ~20 concurrent; that must not be read as “50-person meetings are impossible.”
+## Token path (after 2026-09-18 perf pass)
 
-Abuse resistance remains via anon-ip, user, user-room, room, and auth-ip ceilings.
+1. Overlap `auth.getUser` with meeting lookup by code
+2. Evaluate multi-bucket limiter (after identity is known)
+3. Load participant row for that user/meeting
+4. Authorize via `evaluateLiveKitAccess` (participant + meeting status; client overrides ignored)
+5. Mint LiveKit JWT (`toJwt` ≈ 0–1 ms)
 
-## What this does not do
+Organization/workspace fetches were removed from this path because they did not affect allow/deny.
 
-- Does not prove LiveKit **media** capacity.
-- Does not replace edge WAF / DDoS controls.
-- Does not authorize raising the room cap without a new abuse review.
+Structured logs + `Server-Timing` expose `auth_ms`, `meeting_ms`, `participant_ms`, `livekit_token_ms`, `total_ms` — never tokens or secrets.
 
-## Latency work alongside the limiter
+## Root cause of concurrency latency (measured)
 
-Token path:
+Dominant cost is **Supabase Auth `getUser` (+ meeting PostgREST)** round-trips from Render. LiveKit signing is negligible. Under concurrency, client-observed latency rises with outbound contention; successful **server** `total` for 10 concurrent stayed ~0.5–1.3 s after overlapping auth/meeting.
 
-1. Authenticate (`getUser`)
-2. Evaluate multi-bucket limiter
-3. Load meeting once
-4. Parallelize participant / membership / workspace lookups
+## Staging measurements — BEFORE (same user, pre-overlap)
 
-Structured logs: `requestId`, `room`, `userId`, `durationMs`, outcome — never tokens or secrets.
+Meeting `LM-KX4WWB` (2026-09-18 earlier probe):
 
-## Staging measurements (same authenticated identity)
+| Stage | Success | p50 | p95 | p99 |
+|---|---|---|---|---|
+| Warm ×5 | 5/5 | 1092 | 1340 | — |
+| 10 | 100% | 5147 | 13656 | 13656 |
+| 25 | 80% (5×429) | 2686 | 3409 | 5282 |
+| 50 | 40% | 9139 | 12539 | 14361 |
+| 100 | 20% | 7517 | 12715 | 12742 |
 
-Probe date: 2026-09-18 against Render staging token API + meeting `LM-KX4WWB`.
+## Staging measurements — AFTER (same user, post-overlap)
 
-| Metric | Result |
-|---|---|
-| Cold | 2616 ms (200) |
-| Warm serial ×5 | p50 **1092** ms · p95 **1340** ms · 5/5 success |
-| 10 concurrent | 10/10 success · p50 5147 · p95 13656 · p99 13656 |
-| 25 concurrent | 20×200 + 5×429 (user-room cap) · p50 2686 · p95 3409 · p99 5282 |
-| 50 concurrent | 20×200 + 29×429 + 1 error |
-| 100 concurrent | 20×200 + 77×429 + 3 errors |
+Meeting `LM-YUZX55` via `npm run test:token-perf`:
 
-Interpretation: beyond 20 concurrent requests from **one** user/room, 429 is expected and correct. Distinct-user room capacity remains 120/min (unit-tested). Do not raise user-room to “fix” this probe.
+| Stage | Success | 429 | Client p50/p95/p99 | Server total p50 (200s only) |
+|---|---|---|---|---|
+| Warm ×5 | 5/5 | 0 | 997 / 4184 | sample total 2747 (includes cold-ish) |
+| 1 | 100% | 0 | 2170 / 2170 / 2170 | 1345 |
+| 5 | 100% | 0 | 2136 / 3198 / 3198 | 519 |
+| 10 | 100% | 0 | **1683 / 1999 / 1999** | **576** |
+| 20 | 100% | 0 | 3642 / 4322 / 4531 | 918 |
+| 25 | 80% | 5 | 12135 / 13106 / 13717* | 456 |
+| 50 | 40% | 30 | 3714 / 3944 / 4449* | 1401 |
+| 100 | 20% | 80 | 4034 / 5518 / 5627* | 1094 |
+
+\*Client percentiles mix successful and 429 responses. 429s still pay for `getUser` before the limiter rejects (accurate user-room accounting).
+
+## Remaining bottleneck
+
+Without a staging `SUPABASE_JWT_SECRET` for local JWT verification, every mint still depends on remote Auth `getUser`. Next infrastructure option: configure JWT secret on Render and verify locally, then keep meeting/participant PostgREST (or a single SECURITY DEFINER RPC). Do not cache authorization across removes/revokes.

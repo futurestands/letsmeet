@@ -18,8 +18,9 @@ Token API results are **not** media proof.
 | `adaptiveStream` / `dynacast` / `simulcast` | `ConferenceRoom` LiveKit room options |
 | Active-speaker priority in gallery order | Unit + grid sort |
 | Token multi-bucket rate limit | `server/rate-limit.mjs` + policy unit test (120 distinct users / room / min) |
-| Token warm serial latency | Staging 2026-09-18: p50 ≈1092 ms · p95 ≈1340 ms |
-| Token same-user concurrency | 10 → 100%; ≥25 → 20×200 then user-room 429s (intentional) |
+| Token warm serial latency | Staging after-opt: client p50 ≈997 ms (warm ×5) |
+| Token same-user concurrency | After-opt: 10 → 100% client p50 ≈1683 ms (was ≈5147); ≥25 still user-room 429 |
+| Token phase timings | `Server-Timing`: auth/meeting dominate; livekit ≈0–1 ms |
 
 ## CURRENT UNVERIFIED
 
