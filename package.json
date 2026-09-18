@@ -15,6 +15,7 @@
     "test:phase5-db": "node scripts/phase5-db-security-test.mjs",
     "test:phase6-db": "node scripts/phase6-db-security-test.mjs",
     "test:staging-invites": "node --env-file=.env.staging.local scripts/staging-invitation-e2e.mjs",
+    "test:staging-livekit-dual": "node --env-file=.env.staging.local scripts/staging-livekit-dual-e2e.mjs",
     "test:load": "node scripts/load-test-meetings.mjs",
     "staging:preflight": "node scripts/staging-preflight.mjs",
     "staging:seed": "node --env-file=.env.staging.local scripts/staging-seed.mjs",
