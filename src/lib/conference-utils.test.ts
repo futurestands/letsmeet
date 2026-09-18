@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canUseHostControls,
+  cameraSubscriptionIdentities,
   clampParticipantPage,
   classifyDisconnectReason,
   compareParticipantTiles,
@@ -11,7 +12,9 @@ import {
   isActiveSpeaker,
   liveKitReconnectDelayMs,
   nextLiveKitTokenRefreshDelayMs,
+  pageIndexForIdentity,
   participantPageCount,
+  preferredRemoteVideoQuality,
   resolveSelectedDeviceId,
   shouldAllowReaction,
   shouldAttemptReconnect,
@@ -57,6 +60,34 @@ describe('conference utilities', () => {
     expect(visibleParticipantRange(9, 18)).toEqual({ start: 16, end: 18 });
   });
 
+  it('keeps camera subscriptions limited to the visible page plus pins', () => {
+    const identities = Array.from({ length: 40 }, (_, index) => `user-${index}`);
+    expect([...cameraSubscriptionIdentities({ orderedIdentities: identities, page: 1 })].sort())
+      .toEqual(identities.slice(16, 32));
+    expect(cameraSubscriptionIdentities({
+      orderedIdentities: identities,
+      page: 0,
+      pinnedIdentity: 'user-30',
+    }).has('user-30')).toBe(true);
+    expect(pageIndexForIdentity(identities, 'user-17')).toBe(1);
+    expect(preferredRemoteVideoQuality({
+      identity: 'user-1',
+      pinnedIdentity: 'user-1',
+      speakerIdentities: new Set(),
+      subscribedIdentities: new Set(['user-1']),
+    })).toBe('high');
+    expect(preferredRemoteVideoQuality({
+      identity: 'user-2',
+      speakerIdentities: new Set(),
+      subscribedIdentities: new Set(['user-2']),
+    })).toBe('low');
+    expect(preferredRemoteVideoQuality({
+      identity: 'user-3',
+      speakerIdentities: new Set(),
+      subscribedIdentities: new Set(['user-1']),
+    })).toBe('off');
+  });
+
   it('recovers device selection when a selected device disappears', () => {
     const devices = [{ deviceId: 'camera-a' }, { deviceId: 'camera-b' }];
     expect(resolveSelectedDeviceId('camera-b', devices)).toBe('camera-b');
@@ -75,20 +106,21 @@ describe('conference utilities', () => {
     expect(canUseHostControls('user-a', null)).toBe(false);
   });
 
-  it('keeps local first and prioritizes active speakers without rearranging peers', () => {
+  it('keeps local first, then pinned, then active speakers', () => {
     const tiles = [
-      { identity: 'user-b', isLocal: false, name: 'Bravo', speaking: false },
-      { identity: 'user-a', isLocal: true, name: 'Alpha', speaking: false },
-      { identity: 'user-c', isLocal: false, name: 'Charlie', speaking: false },
+      { identity: 'user-b', isLocal: false, name: 'Bravo', speaking: false, pinned: false },
+      { identity: 'user-a', isLocal: true, name: 'Alpha', speaking: false, pinned: false },
+      { identity: 'user-c', isLocal: false, name: 'Charlie', speaking: false, pinned: false },
+      { identity: 'user-d', isLocal: false, name: 'Delta', speaking: false, pinned: true },
     ];
-    const first = [...tiles].sort(compareParticipantTiles).map((tile) => tile.identity);
-    expect(first).toEqual(['user-a', 'user-b', 'user-c']);
+    expect([...tiles].sort(compareParticipantTiles).map((tile) => tile.identity))
+      .toEqual(['user-a', 'user-d', 'user-b', 'user-c']);
 
     const withSpeaker = tiles.map((tile) => (
-      tile.identity === 'user-c' ? { ...tile, speaking: true } : tile
+      tile.identity === 'user-c' ? { ...tile, speaking: true, pinned: false } : { ...tile, pinned: false }
     ));
     expect([...withSpeaker].sort(compareParticipantTiles).map((tile) => tile.identity))
-      .toEqual(['user-a', 'user-c', 'user-b']);
+      .toEqual(['user-a', 'user-c', 'user-b', 'user-d']);
 
     expect(isActiveSpeaker('user-c', new Set(['user-c']))).toBe(true);
     expect(isActiveSpeaker('user-b', new Set(['user-c']))).toBe(false);

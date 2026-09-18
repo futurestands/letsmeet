@@ -65,21 +65,60 @@ export function connectionStatusMessage(state: ConferenceConnectionState): strin
   }
 }
 
-export function participantPageCount(participantCount: number, pageSize = 16): number {
+export function participantPageCount(participantCount: number, pageSize = GALLERY_PAGE_SIZE): number {
   return Math.max(1, Math.ceil(Math.max(0, participantCount) / pageSize));
 }
 
-export function clampParticipantPage(page: number, participantCount: number, pageSize = 16): number {
+export function clampParticipantPage(page: number, participantCount: number, pageSize = GALLERY_PAGE_SIZE): number {
   return Math.min(Math.max(0, page), participantPageCount(participantCount, pageSize) - 1);
 }
 
-export function visibleParticipantRange(page: number, participantCount: number, pageSize = 16): {
+export function visibleParticipantRange(page: number, participantCount: number, pageSize = GALLERY_PAGE_SIZE): {
   start: number;
   end: number;
 } {
   const safePage = clampParticipantPage(page, participantCount, pageSize);
   const start = safePage * pageSize;
   return { start, end: Math.min(participantCount, start + pageSize) };
+}
+
+export function pageIndexForIdentity(
+  orderedIdentities: readonly string[],
+  identity: string,
+  pageSize = GALLERY_PAGE_SIZE,
+): number | null {
+  const index = orderedIdentities.indexOf(identity);
+  if (index < 0) return null;
+  return Math.floor(index / pageSize);
+}
+
+/**
+ * Camera identities that should stay subscribed for the current gallery page.
+ * Screen-share tracks are managed separately and must remain subscribed.
+ */
+export function cameraSubscriptionIdentities(input: {
+  orderedIdentities: readonly string[];
+  page: number;
+  pinnedIdentity?: string | null;
+  pageSize?: number;
+}): Set<string> {
+  const pageSize = input.pageSize ?? GALLERY_PAGE_SIZE;
+  const range = visibleParticipantRange(input.page, input.orderedIdentities.length, pageSize);
+  const visible = new Set(input.orderedIdentities.slice(range.start, range.end));
+  if (input.pinnedIdentity) visible.add(input.pinnedIdentity);
+  return visible;
+}
+
+export function preferredRemoteVideoQuality(input: {
+  identity: string;
+  pinnedIdentity?: string | null;
+  speakerIdentities: ReadonlySet<string>;
+  subscribedIdentities: ReadonlySet<string>;
+}): 'high' | 'low' | 'off' {
+  if (!input.subscribedIdentities.has(input.identity)) return 'off';
+  if (input.pinnedIdentity === input.identity) return 'high';
+  if (input.speakerIdentities.has(input.identity)) return 'high';
+  return 'low';
 }
 
 export function canUseHostControls(hostId: string, authenticatedUserId?: string | null): boolean {
@@ -128,6 +167,9 @@ export function updateRaisedHands(
 
 export const LIVEKIT_TOKEN_TTL_SECONDS = 6 * 60 * 60;
 
+/** Max camera tiles rendered (and subscribed) per gallery page. Audio stays independent via RoomAudioRenderer. */
+export const GALLERY_PAGE_SIZE = 16;
+
 export type ConferenceDisconnectKind = 'network' | 'removed' | 'room-closed' | 'client';
 
 export type ParticipantTileOrderInput = {
@@ -135,6 +177,7 @@ export type ParticipantTileOrderInput = {
   isLocal: boolean;
   name?: string | null;
   speaking?: boolean;
+  pinned?: boolean;
 };
 
 export type AudioTrackDescriptor = {
@@ -148,6 +191,9 @@ export function compareParticipantTiles(
   right: ParticipantTileOrderInput,
 ): number {
   if (left.isLocal !== right.isLocal) return left.isLocal ? -1 : 1;
+  const leftPinned = Boolean(left.pinned);
+  const rightPinned = Boolean(right.pinned);
+  if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
   const leftSpeaking = Boolean(left.speaking);
   const rightSpeaking = Boolean(right.speaking);
   if (leftSpeaking !== rightSpeaking) return leftSpeaking ? -1 : 1;

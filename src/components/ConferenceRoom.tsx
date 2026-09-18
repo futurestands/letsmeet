@@ -359,6 +359,30 @@ function ConferenceExperience({
     }
   };
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (showReactions) {
+        setShowReactions(false);
+        return;
+      }
+      if (showDevices) {
+        setShowDevices(false);
+        return;
+      }
+      if (toolsOpen) {
+        setToolsOpen(false);
+        return;
+      }
+      if (panel) {
+        panelRef.current = null;
+        setPanel(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [panel, showDevices, showReactions, toolsOpen]);
+
   const connection = connectionRestored && connectionState === ConnectionState.Connected
     ? 'reconnected'
     : mapConnectionState(connectionState);
@@ -446,10 +470,10 @@ function ConferenceExperience({
         <button onClick={() => void toggleScreenShare()} className={`meeting-control ${isScreenShareEnabled ? 'meeting-control-active' : ''}`} aria-label={isScreenShareEnabled ? 'Stop screen sharing' : 'Share screen'} title={isScreenShareEnabled ? 'Stop sharing' : 'Share screen'}>
           <MonitorUp />
         </button>
-        <button onClick={() => selectPanel(panel === 'participants' ? null : 'participants')} className={`meeting-control ${panel === 'participants' ? 'meeting-control-active' : ''}`} aria-label="Toggle participants" title="Participants">
+        <button onClick={() => selectPanel(panel === 'participants' ? null : 'participants')} className={`meeting-control ${panel === 'participants' ? 'meeting-control-active' : ''}`} aria-label="Toggle participants" aria-expanded={panel === 'participants'} title="Participants">
           <Users />
         </button>
-        <button onClick={() => selectPanel(panel === 'chat' ? null : 'chat')} className={`meeting-control relative ${panel === 'chat' ? 'meeting-control-active' : ''}`} aria-label="Toggle meeting chat" title="Chat">
+        <button onClick={() => selectPanel(panel === 'chat' ? null : 'chat')} className={`meeting-control relative ${panel === 'chat' ? 'meeting-control-active' : ''}`} aria-label="Toggle meeting chat" aria-expanded={panel === 'chat'} title="Chat">
           <MessageSquare />
           {unread > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold">{Math.min(unread, 99)}</span>}
         </button>
@@ -461,6 +485,7 @@ function ConferenceExperience({
           }}
           className={`meeting-control ${toolsOpen ? 'meeting-control-active' : ''}`}
           aria-label="Toggle collaboration tools"
+          aria-expanded={toolsOpen}
           title="Polls, Q&A, notes"
         >
           <ClipboardList />
@@ -470,25 +495,25 @@ function ConferenceExperience({
         </button>
 
         <div className="relative">
-          <button onClick={() => setShowReactions((value) => !value)} className="meeting-control" aria-label="Show reactions" title="Reactions">
+          <button onClick={() => setShowReactions((value) => !value)} className="meeting-control" aria-label="Show reactions" aria-expanded={showReactions} aria-haspopup="menu" title="Reactions">
             <Smile />
           </button>
           {showReactions && (
-            <div className="absolute bottom-16 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
+            <div role="menu" className="absolute bottom-16 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
               <p className="w-full px-2 pb-1 text-center text-[10px] text-slate-400">Reactions are short-lived overlays for everyone in the call.</p>
               {REACTIONS.map((emoji) => (
-                <button key={emoji} onClick={(event) => void sendReaction(emoji, event.timeStamp)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
+                <button key={emoji} role="menuitem" onClick={(event) => void sendReaction(emoji, event.timeStamp)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
               ))}
             </div>
           )}
         </div>
 
         <div className="relative">
-          <button onClick={() => setShowDevices((value) => !value)} className="meeting-control" aria-label="Device settings" title="Device settings">
+          <button onClick={() => setShowDevices((value) => !value)} className="meeting-control" aria-label="Device settings" aria-expanded={showDevices} aria-haspopup="dialog" title="Device settings">
             <MoreHorizontal />
           </button>
           {showDevices && (
-            <div className="absolute bottom-16 right-0 z-50 w-[min(18rem,calc(100vw-1.5rem))] space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
+            <div role="dialog" aria-label="Device settings" className="absolute bottom-16 right-0 z-50 w-[min(18rem,calc(100vw-1.5rem))] space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
               {[
                 { label: 'Microphone', kind: 'audioinput' as const, items: devices.microphones },
                 { label: 'Camera', kind: 'videoinput' as const, items: devices.cameras },
@@ -505,7 +530,7 @@ function ConferenceExperience({
                 </label>
               ))}
               {isHost && (
-                <button onClick={() => void toggleLock()} disabled={busyControl === 'lock'} className="flex w-full items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-left hover:bg-slate-800">
+                <button onClick={() => void toggleLock()} disabled={busyControl === 'lock'} className="flex w-full items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-left hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400">
                   {meeting.is_locked ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
                   {meeting.is_locked ? 'Unlock meeting' : 'Lock meeting'}
                 </button>
