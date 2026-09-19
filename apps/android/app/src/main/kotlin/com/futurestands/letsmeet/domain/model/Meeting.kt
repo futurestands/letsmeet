@@ -8,5 +8,6 @@ data class Meeting(
     val code: String,
     val title: String? = null,
     val status: String,
-    val host_id: String? = null
+    val host_id: String? = null,
+    val scheduled_for: String? = null
 )

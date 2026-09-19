@@ -1,8 +1,10 @@
 package com.futurestands.letsmeet.data.repository
 
 import com.futurestands.letsmeet.data.SupabaseClientProvider
-import io.github.jan_tennert.supabase.gotrue.auth
-import io.github.jan_tennert.supabase.gotrue.providers.builtin.Email
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.status.SessionStatus
+import io.github.jan.supabase.auth.user.UserSession
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -22,11 +24,22 @@ class AuthRepository {
 
     fun getSessionFlow(): Flow<Boolean> {
         return auth.sessionStatus.map { status ->
-            status is io.github.jan_tennert.supabase.gotrue.SessionStatus.Authenticated
+            status is SessionStatus.Authenticated
         }
     }
 
     fun getCurrentAccessToken(): String? {
         return auth.currentAccessTokenOrNull()
+    }
+
+    suspend fun importSession(accessToken: String, refreshToken: String) {
+        val session = UserSession(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            expiresIn = 3600L,
+            tokenType = "bearer",
+            user = null
+        )
+        auth.importSession(session)
     }
 }

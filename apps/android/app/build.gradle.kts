@@ -54,6 +54,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
     // Supabase
@@ -61,11 +62,12 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.supabase.realtime)
     implementation(libs.ktor.client.android)
-    implementation(libs.ktor.client.content-negotiation)
-    implementation(libs.ktor.serialization.kotlinx-json)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
 
     // LiveKit
     implementation(libs.livekit.android)
+    implementation(libs.livekit.android.compose)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
@@ -74,7 +76,7 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test-junit4)
+    androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test-manifest)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }

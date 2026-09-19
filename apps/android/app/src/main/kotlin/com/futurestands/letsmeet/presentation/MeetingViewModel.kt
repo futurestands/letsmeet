@@ -34,8 +34,23 @@ class MeetingViewModel : ViewModel() {
     fun joinMeeting(code: String) {
         viewModelScope.launch {
             try {
+                // First ensure participation in Supabase
+                meetingRepository.joinMeeting(code)
+                // Then fetch LiveKit token
                 val response = liveKitRepository.fetchToken(code)
                 _roomToken.value = response.token
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+
+    fun joinAsGuest(code: String, displayName: String, onJoined: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val guestSession = liveKitRepository.createGuestSession(code, displayName)
+                authRepository.importSession(guestSession.access_token, guestSession.refresh_token)
+                onJoined()
             } catch (e: Exception) {
                 // Handle error
             }

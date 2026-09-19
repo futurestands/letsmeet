@@ -1,6 +1,6 @@
 # LeTsMeet Android Architecture Map
 
-This document maps the Android client capabilities to the existing LeTsMeet backend infrastructure.
+This document maps the Android client capabilities to the LeTsMeet backend infrastructure.
 
 ## System Overview
 
@@ -35,60 +35,44 @@ graph TD
 
 ### 1. Authentication (Supabase)
 - **Provider**: Supabase Auth
-- **Android Client**: `io.github.jan-tennert.supabase:gotrue-kt`
-- **Flow**: Standard Email/Password login. Persistent session managed by the SDK.
+- **Android Client**: `io.github.jan.supabase:auth-kt`
+- **Flow**: Email/Password login. Sessions are persisted and restored on launch.
 
 ### 2. Meetings Database (Supabase)
-- **Table**: `meetings`
-    - `id`: UUID (Primary Key)
-    - `code`: String (Unique, e.g., "abc-defg-hij")
-    - `title`: String
-    - `status`: 'scheduled' | 'active' | 'past'
-- **Table**: `meeting_participants`
-    - `meeting_id`: UUID
-    - `user_id`: UUID
-    - `role`: 'host' | 'participant'
 - **RPCs**:
-    - `join_meeting(meeting_code)`: Existing logic to handle participation.
+    - `create_persistent_meeting(p_title)`: Authored meeting creation.
+    - `lookup_joinable_meeting(p_code)`: Secure meeting lookup.
+    - `join_persistent_meeting(p_code)`: Registers participation.
 
 ### 3. LiveKit Token API
 - **Endpoint**: `GET /api/livekit/token?room=<room_code>`
 - **Authentication**: `Authorization: Bearer <supabase_access_token>`
-- **Response**:
-  ```json
-  {
-    "token": "JWT_TOKEN",
-    "room": "room_code",
-    "identity": "user_id",
-    "name": "User Name"
-  }
-  ```
+- **Behavior**: Returns a JWT for LiveKit room access.
 
 ### 4. Guest Access API
 - **Endpoint**: `POST /api/guest/session`
-- **Request**:
-  ```json
-  {
-    "meetingCode": "abc-defg-hij",
-    "displayName": "Guest Name"
-  }
-  ```
-- **Response**: Returns a temporary Supabase session/token for the guest.
+- **Request**: `{ "room": "normalizedCode", "displayName": "Guest Name" }`
+- **Response**: Returns a temporary Supabase session for guest access.
 
-## Feature Mapping
+## Status
 
-| Android Feature | Backend Mapping | Status |
-| :--- | :--- | :--- |
-| **Login/Logout** | Supabase Auth SDK | Ready |
-| **Meeting List** | `meetings` table via Supabase Postgrest | Ready |
-| **Create Meeting** | `meetings` table insert | Ready |
-| **Meeting Details** | `meetings` join `meeting_participants` | Ready |
-| **Join Meeting Room**| LiveKit SDK + Token API | Ready |
-| **Camera/Mic Toggle**| LiveKit LocalTrack management | Ready |
-| **Remote Participants**| LiveKit Room events | Ready |
-| **App Links** | `/join/<code-code>` | Planning |
+| Feature | Implementation | Build Verified | Emulator Verified |
+| :--- | :--- | :--- | :--- |
+| **Login/Logout** | IMPLEMENTED | YES | - |
+| **Session Persistence** | IMPLEMENTED | YES | - |
+| **Meeting List** | IMPLEMENTED | YES | - |
+| **Create Meeting** | IMPLEMENTED (RPC) | YES | - |
+| **Join Meeting Room**| IMPLEMENTED (SDK) | YES | - |
+| **LiveKit Video** | IMPLEMENTED (Grid) | YES | - |
+| **Audio/Video Toggles**| IMPLEMENTED | YES | - |
+| **Guest Join Flow** | IMPLEMENTED | YES | - |
+| **Deep Linking** | IMPLEMENTED | YES | - |
 
-## Security Model
-- **AUTHORITATIVE**: Backend (Supabase RLS + Token API) determines all permissions.
-- **GUESTS**: Restricted via RLS and specific Guest API limits.
-- **SECRETS**: No service-role keys or secrets in the APK. Only Anon Key and URL.
+## Security Summary
+- **Zero Secrets**: No service-role keys or API secrets are embedded in the APK.
+- **Authoritative Backend**: All database operations and LiveKit tokens are secured via RLS and backend logic.
+- **Tenant Isolation**: RPCs enforce organization/workspace context.
+
+## Remaining Blockers
+- **App Link Verification**: Requires `assetlinks.json` deployment on `letsmeet.futurestands.com`.
+- **Runtime Testing**: Physical device testing required for full camera/mic validation.

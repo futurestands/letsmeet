@@ -5,11 +5,15 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.post
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.setBody
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 data class LiveKitTokenResponse(
@@ -17,6 +21,13 @@ data class LiveKitTokenResponse(
     val room: String,
     val identity: String,
     val name: String
+)
+
+@Serializable
+data class GuestSessionResponse(
+    val access_token: String,
+    val refresh_token: String,
+    val expires_in: Int
 )
 
 class LiveKitRepository(private val authRepository: AuthRepository) {
@@ -33,6 +44,16 @@ class LiveKitRepository(private val authRepository: AuthRepository) {
         return client.get("${BuildConfig.LIVEKIT_TOKEN_ENDPOINT}/api/livekit/token") {
             header("Authorization", "Bearer $accessToken")
             parameter("room", roomCode)
+        }.body()
+    }
+
+    suspend fun createGuestSession(roomCode: String, displayName: String): GuestSessionResponse {
+        return client.post("${BuildConfig.LIVEKIT_TOKEN_ENDPOINT}/api/guest/session") {
+            header("Content-Type", "application/json")
+            setBody(buildJsonObject {
+                put("room", roomCode)
+                put("displayName", displayName)
+            })
         }.body()
     }
 }

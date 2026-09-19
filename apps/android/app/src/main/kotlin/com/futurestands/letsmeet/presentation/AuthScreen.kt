@@ -15,6 +15,7 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
     val isAuthenticated by viewModel.isAuthenticated.collectAsState()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(isAuthenticated) {
         if (isAuthenticated) {
@@ -35,7 +36,8 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
             value = email,
             onValueChange = { email = it },
             label = { Text("Email") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
         )
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
@@ -43,14 +45,23 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
             onValueChange = { password = it },
             label = { Text("Password") },
             visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
         )
         Spacer(modifier = Modifier.height(24.dp))
         Button(
-            onClick = { viewModel.login(email, password) },
-            modifier = Modifier.fillMaxWidth()
+            onClick = { 
+                isLoading = true
+                viewModel.login(email, password) 
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading && email.isNotBlank() && password.isNotBlank()
         ) {
-            Text("Login")
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
+            } else {
+                Text("Login")
+            }
         }
     }
 }

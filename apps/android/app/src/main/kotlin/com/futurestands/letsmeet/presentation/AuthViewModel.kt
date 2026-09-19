@@ -13,10 +13,14 @@ class AuthViewModel : ViewModel() {
     private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated
 
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading
+
     init {
         viewModelScope.launch {
-            authRepository.getSessionFlow().collect {
-                _isAuthenticated.value = it
+            authRepository.getSessionFlow().collect { authenticated ->
+                _isAuthenticated.value = authenticated
+                _isLoading.value = false
             }
         }
     }
