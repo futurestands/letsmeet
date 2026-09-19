@@ -37,3 +37,21 @@ playwright-report/
 test-results/
 blob-report/
 playwright/.cache/
+
+# Android
+.gradle/
+build/
+local.properties
+*.apk
+*.aar
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+*~
+*.swp
+*.iml
+.navigation/
+app/build/
+.artifacts/
