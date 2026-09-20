@@ -56,18 +56,18 @@ graph TD
 
 ## Status
 
-| Feature | Implementation | Build Verified | Runtime Verified |
-| :--- | :--- | :--- | :--- |
-| **Login/Logout** | IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Session Persistence** | IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Meeting List** | IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Create Meeting** | IMPLEMENTED (RPC) | PASS | BLOCKED (ENV) |
-| **Join Meeting Room**| IMPLEMENTED (SDK) | PASS | BLOCKED (ENV) |
-| **LiveKit Video** | IMPLEMENTED (Grid) | PASS | BLOCKED (ENV) |
-| **Audio/Video Toggles**| IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Guest Join Flow** | IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Deep Linking** | IMPLEMENTED | PASS | BLOCKED (ENV) |
-| **Collaboration** | Chat/React/Hand | PASS | BLOCKED (ENV) |
+| Feature | Implementation | Build Verified | Lint Verified | Runtime Verified |
+| :--- | :--- | :--- | :--- | :--- |
+| **Login/Logout** | IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Session Persistence** | IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Meeting List** | IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Create Meeting** | IMPLEMENTED (RPC) | PASS | PASS | BLOCKED (ENV) |
+| **Join Meeting Room**| IMPLEMENTED (SDK) | PASS | PASS | BLOCKED (ENV) |
+| **LiveKit Video** | IMPLEMENTED (Grid) | PASS | PASS | BLOCKED (ENV) |
+| **Audio/Video Toggles**| IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Guest Join Flow** | IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Deep Linking** | IMPLEMENTED | PASS | PASS | BLOCKED (ENV) |
+| **Collaboration** | Chat/React/Hand | PASS | PASS | BLOCKED (ENV) |
 
 ## Security Summary
 - **Zero Secrets**: No service-role keys or API secrets are embedded in the APK.

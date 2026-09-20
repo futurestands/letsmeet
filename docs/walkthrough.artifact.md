@@ -29,13 +29,15 @@ This document summarizes the final state of the Android foundation for LeTsMeet.
 | Test | Result |
 | :--- | :--- |
 | `assembleDebug` | **SUCCESS** |
+| `android unit tests` | **SUCCESS** |
+| `android lint` | **SUCCESS** |
 | `web lint` | **SUCCESS** |
 | `web build` | **SUCCESS** |
 | `Supabase Auth` | **IMPLEMENTED** |
 | `LiveKit Connection` | **IMPLEMENTED** |
 | `Meeting Creation` | **IMPLEMENTED (SECURE)** |
+| `Collaboration (Chat/React)` | **IMPLEMENTED** |
 
 ## Next Steps
 - Deploy `assetlinks.json` for verified App Links.
-- Conduct cross-platform smoke tests on physical devices.
-- Implement Chat and Reactions in the Android meeting room.
+- Conduct cross-platform smoke tests on physical devices (Audio/Video).
