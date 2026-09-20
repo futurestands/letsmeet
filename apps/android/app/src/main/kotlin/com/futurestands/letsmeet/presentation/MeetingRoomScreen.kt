@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -145,7 +147,7 @@ fun MeetingRoomScreen(
                                 Badge { Text(chatMessages.size.toString()) }
                             }
                         }) {
-                            Icon(Icons.Default.Chat, contentDescription = "Chat")
+                            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "Chat")
                         }
                     }
                     IconButton(onClick = { isParticipantsOpen = true }) {
@@ -284,7 +286,7 @@ fun MeetingRoomScreen(
                             chatMessageText = ""
                         }
                     }) {
-                        Icon(Icons.Default.Send, contentDescription = "Send")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                     }
                 }
             }

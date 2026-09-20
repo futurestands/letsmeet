@@ -73,7 +73,7 @@ class MeetingViewModel : ViewModel() {
             try {
                 // First ensure participation in Supabase
                 meetingRepository.joinMeeting(code)
-                
+
                 val meeting = meetingRepository.getMeetingByCode(code)
                 if (meeting != null) {
                     currentMeetingId = meeting.id
@@ -119,37 +119,41 @@ class MeetingViewModel : ViewModel() {
     }
 
     private fun subscribeToMeetingEvents(meetingId: String) {
-        val channel = realtime.channel("meeting_$meetingId")
-        activeChannel = channel
-        
-        // Chat
-        val chatFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-            table = "chat_messages"
-            filter("meeting_id", FilterOperator.EQ, meetingId)
-        }
-        
-        // Reactions
-        val reactionFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-            table = "meeting_reactions"
-            filter("meeting_id", FilterOperator.EQ, meetingId)
-        }
-        
-        // Hand Raises
-        val handRaiseFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
-            table = "meeting_hand_raises"
-            filter("meeting_id", FilterOperator.EQ, meetingId)
-        }
-
         viewModelScope.launch {
+            activeChannel?.let {
+                realtime.removeChannel(it)
+            }
+
+            val channel = realtime.channel("meeting_$meetingId")
+            activeChannel = channel
+
+            // Chat
+            val chatFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                table = "chat_messages"
+                filter("meeting_id", FilterOperator.EQ, meetingId)
+            }
+
+            // Reactions
+            val reactionFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                table = "meeting_reactions"
+                filter("meeting_id", FilterOperator.EQ, meetingId)
+            }
+
+            // Hand Raises
+            val handRaiseFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                table = "meeting_hand_raises"
+                filter("meeting_id", FilterOperator.EQ, meetingId)
+            }
+
             channel.subscribe()
-            
+
             launch {
                 chatFlow.collect { action ->
                     val newMessage = action.decodeRecord<ChatMessage>()
                     _chatMessages.value = _chatMessages.value + newMessage
                 }
             }
-            
+
             launch {
                 reactionFlow.collect { action ->
                     val newReaction = action.decodeRecord<MeetingReaction>()
@@ -161,7 +165,7 @@ class MeetingViewModel : ViewModel() {
                     }
                 }
             }
-            
+
             launch {
                 handRaiseFlow.collect { action ->
                     when (action) {
