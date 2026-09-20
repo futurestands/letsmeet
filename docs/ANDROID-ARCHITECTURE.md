@@ -56,17 +56,18 @@ graph TD
 
 ## Status
 
-| Feature | Implementation | Build Verified | Emulator Verified |
+| Feature | Implementation | Build Verified | Runtime Verified |
 | :--- | :--- | :--- | :--- |
-| **Login/Logout** | IMPLEMENTED | YES | - |
-| **Session Persistence** | IMPLEMENTED | YES | - |
-| **Meeting List** | IMPLEMENTED | YES | - |
-| **Create Meeting** | IMPLEMENTED (RPC) | YES | - |
-| **Join Meeting Room**| IMPLEMENTED (SDK) | YES | - |
-| **LiveKit Video** | IMPLEMENTED (Grid) | YES | - |
-| **Audio/Video Toggles**| IMPLEMENTED | YES | - |
-| **Guest Join Flow** | IMPLEMENTED | YES | - |
-| **Deep Linking** | IMPLEMENTED | YES | - |
+| **Login/Logout** | IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Session Persistence** | IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Meeting List** | IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Create Meeting** | IMPLEMENTED (RPC) | PASS | BLOCKED (ENV) |
+| **Join Meeting Room**| IMPLEMENTED (SDK) | PASS | BLOCKED (ENV) |
+| **LiveKit Video** | IMPLEMENTED (Grid) | PASS | BLOCKED (ENV) |
+| **Audio/Video Toggles**| IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Guest Join Flow** | IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Deep Linking** | IMPLEMENTED | PASS | BLOCKED (ENV) |
+| **Collaboration** | Chat/React/Hand | PASS | BLOCKED (ENV) |
 
 ## Security Summary
 - **Zero Secrets**: No service-role keys or API secrets are embedded in the APK.
@@ -75,4 +76,5 @@ graph TD
 
 ## Remaining Blockers
 - **App Link Verification**: Requires `assetlinks.json` deployment on `letsmeet.futurestands.com`.
-- **Runtime Testing**: Physical device testing required for full camera/mic validation.
+- **Runtime Validation**: Physical device or emulator with camera/mic drivers is required to verify real-time media flows.
+- **Interoperability Confirmation**: Web <-> Android media validation is pending real device availability.
