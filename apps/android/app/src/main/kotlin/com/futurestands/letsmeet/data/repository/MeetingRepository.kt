@@ -1,6 +1,7 @@
 package com.futurestands.letsmeet.data.repository
 
 import com.futurestands.letsmeet.data.SupabaseClientProvider
+import com.futurestands.letsmeet.domain.model.ChatMessage
 import com.futurestands.letsmeet.domain.model.Meeting
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,37 @@ class MeetingRepository {
         val normalizedCode = code.trim().uppercase()
         postgrest.rpc("join_persistent_meeting", buildJsonObject {
             put("p_code", normalizedCode)
+        })
+    }
+
+    suspend fun getChatMessages(meetingId: String): List<ChatMessage> = withContext(Dispatchers.IO) {
+        postgrest.from("chat_messages")
+            .select {
+                filter {
+                    eq("meeting_id", meetingId)
+                }
+            }
+            .decodeList<ChatMessage>()
+    }
+
+    suspend fun sendChatMessage(meetingId: String, message: String) = withContext(Dispatchers.IO) {
+        postgrest.rpc("send_persistent_chat", buildJsonObject {
+            put("p_meeting_id", meetingId)
+            put("p_message", message)
+        })
+    }
+
+    suspend fun sendReaction(meetingId: String, emoji: String) = withContext(Dispatchers.IO) {
+        postgrest.rpc("send_meeting_reaction", buildJsonObject {
+            put("p_meeting_id", meetingId)
+            put("p_emoji", emoji)
+        })
+    }
+
+    suspend fun setHandRaised(meetingId: String, raised: Boolean) = withContext(Dispatchers.IO) {
+        postgrest.rpc("set_hand_raised", buildJsonObject {
+            put("p_meeting_id", meetingId)
+            put("p_raised", raised)
         })
     }
 }

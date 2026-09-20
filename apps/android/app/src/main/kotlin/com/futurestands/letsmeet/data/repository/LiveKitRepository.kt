@@ -37,18 +37,24 @@ class LiveKitRepository(private val authRepository: AuthRepository) {
         }
     }
 
+    private val apiBaseUrl: String
+        get() = BuildConfig.LIVEKIT_TOKEN_ENDPOINT
+            .removeSuffix("/api/livekit/token")
+            .removeSuffix("/api/guest/session")
+            .removeSuffix("/")
+
     suspend fun fetchToken(roomCode: String): LiveKitTokenResponse {
         val accessToken = authRepository.getCurrentAccessToken()
             ?: throw IllegalStateException("Not authenticated")
 
-        return client.get("${BuildConfig.LIVEKIT_TOKEN_ENDPOINT}/api/livekit/token") {
+        return client.get("$apiBaseUrl/api/livekit/token") {
             header("Authorization", "Bearer $accessToken")
             parameter("room", roomCode)
         }.body()
     }
 
     suspend fun createGuestSession(roomCode: String, displayName: String): GuestSessionResponse {
-        return client.post("${BuildConfig.LIVEKIT_TOKEN_ENDPOINT}/api/guest/session") {
+        return client.post("$apiBaseUrl/api/guest/session") {
             header("Content-Type", "application/json")
             setBody(buildJsonObject {
                 put("room", roomCode)

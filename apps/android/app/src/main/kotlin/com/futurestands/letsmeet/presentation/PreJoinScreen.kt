@@ -14,9 +14,9 @@ fun PreJoinScreen(
     meetingCode: String,
     viewModel: MeetingViewModel
 ) {
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
     var displayName by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -36,17 +36,20 @@ fun PreJoinScreen(
             enabled = !isLoading
         )
         
-        if (errorMessage != null) {
-            Text(errorMessage!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+        if (error != null) {
+            Text(
+                text = error!!,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
         
         Spacer(modifier = Modifier.height(24.dp))
         
         Button(
             onClick = {
-                isLoading = true
                 viewModel.joinAsGuest(meetingCode, displayName) {
-                    isLoading = false
                     navController.navigate("room/$meetingCode") {
                         popUpTo("prejoin/$meetingCode") { inclusive = true }
                     }
@@ -64,6 +67,13 @@ fun PreJoinScreen(
         
         TextButton(onClick = { navController.navigate("auth") }) {
             Text("Sign in to your account")
+        }
+    }
+
+    // Clear error when leaving screen
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.clearError()
         }
     }
 }

@@ -16,6 +16,9 @@ class AuthViewModel : ViewModel() {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading
 
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
+
     init {
         viewModelScope.launch {
             authRepository.getSessionFlow().collect { authenticated ->
@@ -26,18 +29,30 @@ class AuthViewModel : ViewModel() {
     }
 
     fun login(email: String, password: String) {
+        _isLoading.value = true
+        _error.value = null
         viewModelScope.launch {
             try {
                 authRepository.login(email, password)
             } catch (e: Exception) {
-                // Handle error
+                _error.value = "Login failed: ${e.message}"
+            } finally {
+                _isLoading.value = false
             }
         }
     }
 
     fun logout() {
         viewModelScope.launch {
-            authRepository.logout()
+            try {
+                authRepository.logout()
+            } catch (e: Exception) {
+                _error.value = "Logout failed: ${e.message}"
+            }
         }
+    }
+
+    fun clearError() {
+        _error.value = null
     }
 }

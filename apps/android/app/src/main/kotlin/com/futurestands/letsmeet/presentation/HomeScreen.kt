@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -20,6 +21,8 @@ fun HomeScreen(
     authViewModel: AuthViewModel = viewModel()
 ) {
     val meetings by viewModel.meetings.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
     val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
 
     LaunchedEffect(isAuthenticated) {
@@ -51,12 +54,25 @@ fun HomeScreen(
             }
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding)
-        ) {
-            items(meetings) { meeting ->
-                MeetingItem(meeting) {
-                    navController.navigate("room/${meeting.code}")
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (isLoading && meetings.isEmpty()) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else if (error != null && meetings.isEmpty()) {
+                Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error)
+                    Button(onClick = { viewModel.loadMeetings() }) {
+                        Text("Retry")
+                    }
+                }
+            } else if (meetings.isEmpty()) {
+                Text("No meetings found.", modifier = Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(meetings) { meeting ->
+                        MeetingItem(meeting) {
+                            navController.navigate("room/${meeting.code}")
+                        }
+                    }
                 }
             }
         }

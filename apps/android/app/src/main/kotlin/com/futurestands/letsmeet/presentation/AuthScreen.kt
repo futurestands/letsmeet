@@ -13,9 +13,11 @@ import androidx.navigation.NavController
 @Composable
 fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewModel()) {
     val isAuthenticated by viewModel.isAuthenticated.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
+    
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(isAuthenticated) {
         if (isAuthenticated) {
@@ -31,7 +33,9 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
         verticalArrangement = Arrangement.Center
     ) {
         Text("LeTsMeet Login", style = MaterialTheme.typography.headlineMedium)
+        
         Spacer(modifier = Modifier.height(32.dp))
+        
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -39,7 +43,9 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading
         )
+        
         Spacer(modifier = Modifier.height(8.dp))
+        
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -48,12 +54,20 @@ fun AuthScreen(navController: NavController, viewModel: AuthViewModel = viewMode
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading
         )
+        
+        if (error != null) {
+            Text(
+                text = error!!,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        
         Spacer(modifier = Modifier.height(24.dp))
+        
         Button(
-            onClick = { 
-                isLoading = true
-                viewModel.login(email, password) 
-            },
+            onClick = { viewModel.login(email, password) },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading && email.isNotBlank() && password.isNotBlank()
         ) {
