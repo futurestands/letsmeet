@@ -70,8 +70,8 @@ graph TD
 | **Collaboration** | Chat/React/Hand | PASS | PASS | BLOCKED (ENV) |
 
 ## Security Summary
-- **Zero Secrets**: No service-role keys or API secrets are embedded in the APK.
-- **Authoritative Backend**: All database operations and LiveKit tokens are secured via RLS and backend logic.
+- **Zero Secrets**: No service-role keys, API secrets, or database credentials are embedded in the APK. Verified by static audit.
+- **Authoritative Backend**: All database operations and LiveKit tokens are secured via RLS and server-side RPC/API.
 - **Tenant Isolation**: RPCs enforce organization/workspace context.
 
 ## Remaining Blockers

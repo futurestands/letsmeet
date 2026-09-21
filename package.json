@@ -45,9 +45,12 @@
     "@supabase/supabase-js": "^2.116.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
     "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.19.0",
     "lucide-react": "^1.43.0",
+    "p-limit": "^7.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3"

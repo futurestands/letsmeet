@@ -2,22 +2,22 @@ import { createClient } from '@supabase/supabase-js';
 import { isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
 
-const guestSessionLimiter = createRateLimiter();
-
 function sanitizeDisplayName(value) {
   const name = String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, 80);
   if (name.length < 2) return null;
   return name;
 }
 
-export function createGuestSessionHandlers({ supabaseAdmin, supabaseUrl, authKey, logEvent }) {
+export function createGuestSessionHandlers({ supabaseAdmin, supabaseUrl, authKey, logEvent, redis }) {
+  const guestSessionLimiter = createRateLimiter({ redis });
+
   async function previewMeeting(req, res) {
     const room = normalizeRoomCode(req.query.room);
     if (!isAllowedRoomCode(room) || !supabaseAdmin) {
       return res.status(400).json({ error: 'Meeting code is invalid.' });
     }
 
-    const decision = guestSessionLimiter.evaluateTokenRequest({
+    const decision = await guestSessionLimiter.evaluateTokenRequest({
       ip: req.ip,
       authenticated: false,
     });
@@ -74,7 +74,7 @@ export function createGuestSessionHandlers({ supabaseAdmin, supabaseUrl, authKey
       return res.status(400).json({ error: 'Enter a display name to join as a guest.' });
     }
 
-    const decision = guestSessionLimiter.evaluateTokenRequest({
+    const decision = await guestSessionLimiter.evaluateTokenRequest({
       ip: req.ip,
       authenticated: false,
     });

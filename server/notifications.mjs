@@ -154,14 +154,47 @@ export async function deliverEmailViaConfiguredProvider(job) {
 }
 
 export async function deliverSmsViaConfiguredProvider(job) {
-  if (!notificationProviderConfigured('sms') || !job?.recipient) {
-    return { delivered: false, skipped: true, reason: 'SMS provider is not configured.' };
+  const provider = String(process.env.NOTIFICATION_SMS_PROVIDER || '').toLowerCase();
+  const apiKey = process.env.NOTIFICATION_SMS_API_KEY;
+  const from = process.env.NOTIFICATION_SMS_FROM;
+
+  if (!provider || !apiKey || !from || !job?.recipient) {
+    return { delivered: false, skipped: true, reason: 'SMS provider is not fully configured.' };
   }
+
+  const text = `LeTsMeet: A ${String(job.template || 'notification').replace(/_/g, ' ')} is waiting.`;
+
+  if (provider === 'twilio') {
+    // Adapter for Twilio. Business logic stays clean of Twilio SDK.
+    try {
+      const auth = Buffer.from(`${apiKey}:${process.env.NOTIFICATION_SMS_SECRET}`).toString('base64');
+      const response = await sendWithTimeout(() => fetch(`https://api.twilio.com/2010-04-01/Accounts/${apiKey}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          From: from,
+          To: job.recipient,
+          Body: text
+        })
+      }));
+      const body = await response.json();
+      if (!response.ok) {
+        return { delivered: false, skipped: false, reason: `Twilio error: ${body.message}` };
+      }
+      return { delivered: true, skipped: false, provider: 'twilio', providerMessageId: body.sid };
+    } catch (error) {
+      return { delivered: false, skipped: false, reason: `Twilio fetch failed: ${error.message}` };
+    }
+  }
+
   // Intentionally not wired to a vendor until staging credentials exist.
   return {
     delivered: false,
     skipped: true,
-    reason: 'SMS provider credentials are present, but no SMS vendor adapter is enabled yet.',
+    reason: `Unsupported SMS provider "${provider}". Supported: twilio (foundation).`,
   };
 }
 

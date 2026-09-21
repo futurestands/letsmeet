@@ -2,6 +2,9 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 import { createClient } from '@supabase/supabase-js';
+import Redis from 'ioredis';
+import jwt from 'jsonwebtoken';
+import pLimit from 'p-limit';
 import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
 import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload } from './recordings.mjs';
@@ -16,11 +19,21 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((item) => item.trim()).filter(Boolean);
-const tokenRateLimiter = createRateLimiter();
+
+// Scalability: Redis initialization
+const redisUrl = process.env.REDIS_URL;
+const redis = redisUrl ? new Redis(redisUrl, {
+  maxRetriesPerRequest: 3,
+  retryStrategy: (times) => Math.min(times * 50, 2000),
+}) : null;
+
+const tokenRateLimiter = createRateLimiter({ redis });
 const tokenMetrics = createTokenMetrics();
+const authLimit = pLimit(50); // Bound remote dependency concurrency
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseJwtSecret = process.env.SUPABASE_JWT_SECRET;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 // Prefer publishable/anon for password grant when present; fall back to service role (server-only).
 const supabaseAuthKey = supabaseAnonKey || supabaseServiceRoleKey;
@@ -118,6 +131,7 @@ const guestHandlers = createGuestSessionHandlers({
   supabaseUrl,
   authKey: supabaseAuthKey,
   logEvent,
+  redis,
 });
 
 app.get('/api/guest/meeting-preview', (req, res) => {
@@ -153,7 +167,7 @@ app.get('/api/livekit/token', async (req, res) => {
   }
 
   if (!authToken || !supabaseAdmin || !supabaseUrl) {
-    const anonDecision = tokenRateLimiter.evaluateTokenRequest({
+    const anonDecision = await tokenRateLimiter.evaluateTokenRequest({
       ip: req.ip,
       authenticated: false,
     });
@@ -166,31 +180,55 @@ app.get('/api/livekit/token', async (req, res) => {
   }
 
   try {
+    // Scalability: Local JWT verification if secret is available
+    let user = null;
+    let authError = null;
+
+    if (supabaseJwtSecret) {
+      try {
+        const decoded = jwt.verify(authToken, supabaseJwtSecret);
+        // Supabase JWT payload contains user id in 'sub'
+        user = {
+          id: decoded.sub,
+          email: decoded.email,
+          user_metadata: decoded.user_metadata || {},
+        };
+      } catch (err) {
+        authError = err;
+      }
+    }
+
     // Auth and meeting resolution do not depend on each other — overlap the RTTs.
     const authStarted = Date.now();
     const meetingStarted = Date.now();
-    const [authResult, meetingResult] = await Promise.all([
-      supabaseAdmin.auth.getUser(authToken),
-      isAllowedRoomCode(room)
-        ? supabaseAdmin
-            .from('meetings')
-            .select('id, code, host_id, status, organization_id, workspace_id')
-            .eq('code', room)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ]);
+
+    // Only call getUser if local verify was skipped or failed. Bounded concurrency.
+    const authPromise = authLimit(() => user
+      ? Promise.resolve({ data: { user }, error: null })
+      : supabaseAdmin.auth.getUser(authToken));
+
+    const meetingPromise = authLimit(() => isAllowedRoomCode(room)
+      ? supabaseAdmin
+          .from('meetings')
+          .select('id, code, host_id, status, organization_id, workspace_id')
+          .eq('code', room)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }));
+
+    const [authResult, meetingResult] = await Promise.all([authPromise, meetingPromise]);
+
     timing.auth_ms = Date.now() - authStarted;
     timing.meeting_ms = Date.now() - meetingStarted;
     mark('auth_meeting_wall_ms');
 
-    const user = authResult.data?.user;
+    user = authResult.data?.user;
     if (authResult.error || !user) {
       tokenMetrics.recordTokenOutcome(401, timing);
       return res.status(401).json({ error: 'Session is invalid or expired.' });
     }
 
     const rateStarted = Date.now();
-    const rate = tokenRateLimiter.evaluateTokenRequest({
+    const rate = await tokenRateLimiter.evaluateTokenRequest({
       ip: req.ip,
       userId: user.id,
       room,
@@ -221,12 +259,12 @@ app.get('/api/livekit/token', async (req, res) => {
     // added a third remote query under concurrency.
     const participantStarted = Date.now();
     const { data: participant } = meeting
-      ? await supabaseAdmin
+      ? await authLimit(() => supabaseAdmin
           .from('meeting_participants')
           .select('id, meeting_id, user_id, organization_id, workspace_id, role, status')
           .eq('meeting_id', meeting.id)
           .eq('user_id', user.id)
-          .maybeSingle()
+          .maybeSingle())
       : { data: null };
     timing.participant_ms = Date.now() - participantStarted;
 

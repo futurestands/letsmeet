@@ -1,57 +1,78 @@
 /**
- * Token API rate-limit policy.
+ * Distributed rate-limit policy for LeTsMeet.
  *
- * Goals:
- * - Block anonymous / cross-IP abuse
- * - Allow a legitimate meeting join burst (many authenticated users, same room)
- * - Keep per-user sustained rates modest
- *
- * Buckets (window = 60s unless noted):
- * - anon/ip: 20 / min
- * - authenticated user: 60 / min
- * - authenticated user+meeting: 20 / min (rejoin storms)
- * - meeting global authenticated: 120 / min (≈2 joins/sec sustained)
+ * Support process-local Map for development and Redis for horizontal scaling.
  */
 
-export function createRateLimiter(clock = () => Date.now()) {
-  const buckets = new Map();
+export function createRateLimiter(options = {}) {
+  const { redis, clock = () => Date.now() } = options;
+  const memoryBuckets = new Map();
 
-  function allow(key, limit, windowMs) {
+  async function allowMemory(key, limit, windowMs) {
     const now = clock();
-    const next = (buckets.get(key) ?? []).filter((stamp) => now - stamp < windowMs);
-    if (next.length >= limit) {
-      buckets.set(key, next);
+    const stamps = memoryBuckets.get(key) ?? [];
+    const validStamps = stamps.filter((stamp) => now - stamp < windowMs);
+    if (validStamps.length >= limit) {
+      memoryBuckets.set(key, validStamps);
       return false;
     }
-    next.push(now);
-    buckets.set(key, next);
+    validStamps.push(now);
+    memoryBuckets.set(key, validStamps);
     return true;
   }
 
-  function evaluateTokenRequest({ ip, userId, room, authenticated }) {
+  async function allowRedis(key, limit, windowMs) {
+    if (!redis) return allowMemory(key, limit, windowMs);
+
+    try {
+      const fullKey = `ratelimit:${key}`;
+      const now = clock();
+      const windowStart = now - windowMs;
+
+      const multi = redis.multi();
+      multi.zremrangebyscore(fullKey, 0, windowStart);
+      multi.zadd(fullKey, now, `${now}-${Math.random()}`);
+      multi.zcard(fullKey);
+      multi.pexpire(fullKey, Math.ceil(windowMs / 1000) + 1); // TTL in seconds
+
+      const results = await multi.exec();
+      const count = results[2][1];
+
+      return count <= limit;
+    } catch (error) {
+      console.error('Redis rate limit error, falling back to memory:', error);
+      return allowMemory(key, limit, windowMs);
+    }
+  }
+
+  const allow = redis ? allowRedis : allowMemory;
+
+  async function evaluateTokenRequest({ ip, userId, room, authenticated }) {
     const windowMs = 60_000;
+
     if (!authenticated) {
-      if (!allow(`anon-ip:${ip || 'unknown'}`, 20, windowMs)) {
-        return { ok: false, reason: 'anon-ip' };
-      }
+      const ok = await allow(`anon-ip:${ip || 'unknown'}`, 20, windowMs);
+      if (!ok) return { ok: false, reason: 'anon-ip' };
       return { ok: true };
     }
 
-    if (!allow(`user:${userId}`, 60, windowMs)) {
-      return { ok: false, reason: 'user' };
-    }
-    if (room && !allow(`user-room:${userId}:${room}`, 20, windowMs)) {
-      return { ok: false, reason: 'user-room' };
-    }
-    if (room && !allow(`room:${room}`, 120, windowMs)) {
-      return { ok: false, reason: 'room' };
-    }
-    // Keep a soft IP ceiling for stolen tokens / shared NAT abuse.
-    if (!allow(`auth-ip:${ip || 'unknown'}`, 180, windowMs)) {
-      return { ok: false, reason: 'auth-ip' };
-    }
+    // Parallel checks for authenticated buckets
+    const checks = [
+      allow(`user:${userId}`, 60, windowMs),
+      room ? allow(`user-room:${userId}:${room}`, 20, windowMs) : Promise.resolve(true),
+      room ? allow(`room:${room}`, 120, windowMs) : Promise.resolve(true),
+      allow(`auth-ip:${ip || 'unknown'}`, 180, windowMs)
+    ];
+
+    const results = await Promise.all(checks);
+
+    if (!results[0]) return { ok: false, reason: 'user' };
+    if (!results[1]) return { ok: false, reason: 'user-room' };
+    if (!results[2]) return { ok: false, reason: 'room' };
+    if (!results[3]) return { ok: false, reason: 'auth-ip' };
+
     return { ok: true };
   }
 
-  return { allow, evaluateTokenRequest, buckets };
+  return { evaluateTokenRequest, isDistributed: Boolean(redis) };
 }

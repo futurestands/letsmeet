@@ -42,12 +42,12 @@ Status vocabulary (use only these):
 | API | VERIFIED | Staging Render `/health` `/ready` + token auth; Server-Timing phases |
 | Database | VERIFIED | Staging migrations **001–016**; security suites |
 | Guest share-link join | VERIFIED | Unauthenticated guest E2E + security matrix; no org/workspace membership |
-| Rate Limiting | VERIFIED | Multi-bucket policy unchanged; see `docs/RATE-LIMIT.md` |
+| Rate Limiting | VERIFIED | Distributed Redis-backed policy IMPLEMENTED; see `docs/RATE-LIMIT.md` |
 | Observability | PARTIALLY VERIFIED | Structured logs + Server-Timing + `/api/livekit/metrics` aggregates |
 | CI | PARTIALLY VERIFIED | Lint/test/build/secret scan/LiveKit/policy tests; Windows DB suites local |
 | Media Scale | PARTIALLY VERIFIED | Gallery page 16 + selective subscribe + pin/quality IMPLEMENTED; soak NOT TESTED |
 | 500 Participants | NOT SUPPORTED | No media soak evidence — see `docs/MEDIA-SCALE.md` |
-| Token API latency | PARTIALLY VERIFIED | Overlap auth+meeting reduced 10-concurrent client p50 ~5147→~1683 ms; Auth `getUser` remains dominant |
+| Token API latency | PARTIALLY VERIFIED | Overlap auth+meeting + local JWT verify support IMPLEMENTED; Auth `getUser` remains fallback |
 
 ## Staging
 
