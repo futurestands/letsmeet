@@ -53,59 +53,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const { data, error } = await supabase
+      // 1. Load user profile row
+      const { data: userData, error: userError } = await supabase
         .from('users')
         .select('*')
         .eq('id', authUser.id)
         .maybeSingle();
 
-      if (error && !['PGRST116', '42P01'].includes(error.code ?? '')) {
-        console.error('Failed to load user profile', error);
+      if (userError && !['PGRST116', '42P01'].includes(userError.code ?? '')) {
+        console.error('Failed to load user profile', userError);
       }
 
-      if (data) {
-        setUser(data as User);
-        return;
+      // 2. Load organization context
+      const { data: membership, error: membershipError } = await supabase
+        .from('organization_members')
+        .select('organization_id, status')
+        .eq('user_id', authUser.id)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
+
+      if (membershipError) {
+        console.error('Failed to load organization context', membershipError);
       }
 
-      if (guest) {
-        // Guests get a profile row only — never an organization/workspace.
-        const { error: upsertError } = await supabase.from('users').upsert({
-          id: authUser.id,
-          email: fallbackUser.email || `${authUser.id}@guest.letsmeet.invalid`,
-          full_name: fallbackUser.full_name,
-        }, { onConflict: 'id' });
-        if (upsertError) {
-          console.error('Failed to persist guest profile', upsertError);
+      // 3. Provision if either profile or organization context is missing
+      if (!userData || (!guest && !membership)) {
+        if (guest) {
+          // Guests get a profile row only — never an organization/workspace.
+          const { error: upsertError } = await supabase.from('users').upsert({
+            id: authUser.id,
+            email: fallbackUser.email || `${authUser.id}@guest.letsmeet.invalid`,
+            full_name: fallbackUser.full_name,
+          }, { onConflict: 'id' });
+          if (upsertError) {
+            console.error('Failed to persist guest profile', upsertError);
+          }
+        } else {
+          // Real users get full organization context. Call is idempotent.
+          const { error: contextError } = await supabase.rpc('ensure_user_profile_context', {
+            p_user_id: authUser.id,
+            p_email: authUser.email ?? '',
+            p_full_name: fallbackUser.full_name,
+          });
+
+          if (contextError && contextError.code !== '42P01') {
+            console.error('Failed to provision user context', contextError);
+          }
         }
-        const { data: guestProfile } = await supabase
+
+        // Reload profile and context after provisioning
+        const { data: reloadedProfile } = await supabase
           .from('users')
           .select('*')
           .eq('id', authUser.id)
           .maybeSingle();
-        setUser((guestProfile as User | null) ?? fallbackUser);
-        return;
+        setUser((reloadedProfile as User | null) ?? fallbackUser);
+      } else {
+        setUser((userData as User | null) ?? fallbackUser);
       }
-
-      const { error: contextError } = await supabase.rpc('ensure_user_profile_context', {
-        p_user_id: authUser.id,
-        p_email: authUser.email ?? '',
-        p_full_name: fallbackUser.full_name,
-      });
-
-      if (contextError && contextError.code !== '42P01') {
-        console.error('Failed to provision user organization context', contextError);
-      }
-
-      const { data: provisionedProfile } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      setUser((provisionedProfile as User | null) ?? fallbackUser);
     } catch (error) {
-      console.error('User provisioning failed', error);
+      console.error('Auth context initialization failed', error);
       setUser(fallbackUser);
     } finally {
       setLoading(false);
