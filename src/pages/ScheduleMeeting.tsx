@@ -77,8 +77,11 @@ export default function ScheduleMeeting() {
       setScheduledFor(meetingEntry.scheduled_for ?? previewInstant?.toISOString() ?? null);
       setShareLink(`${window.location.origin}${window.location.pathname}#${meetingJoinPath(nextCode)}`);
       setCopied(false);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Failed to save this meeting.');
+    } catch (error: unknown) {
+      // Improve error reporting to show the real message from Supabase/Postgres
+      const postgrestError = error as { message?: string; error_description?: string };
+      const message = postgrestError?.message || postgrestError?.error_description || (error instanceof Error ? error.message : null);
+      setSaveError(message || 'Failed to save this meeting.');
     } finally {
       setSaving(false);
     }

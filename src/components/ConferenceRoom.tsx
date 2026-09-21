@@ -16,7 +16,7 @@ import {
   PhoneOff,
   Smile,
   Users,
-  FiberManualRecord,
+  Circle as FiberManualRecord,
 } from 'lucide-react';
 import {
   LiveKitRoom,
@@ -40,6 +40,8 @@ import {
   sendPersistentChat,
   setHandRaised as persistHandRaised,
   setPersistentMeetingLock,
+  listMeetingRecordings,
+  type MeetingRecording,
 } from '../lib/data-access';
 import {
   connectionStatusMessage,

@@ -356,7 +356,10 @@ export async function schedulePersistentMeeting(input: {
     p_description: input.description ?? null,
     p_duration_minutes: input.durationMinutes ?? 30,
   });
-  if (error) throw error;
+  if (error) {
+    console.error('RPC schedule_persistent_meeting failed:', error);
+    throw error;
+  }
   return data as ScheduledMeetingSummary;
 }
 
@@ -397,7 +400,10 @@ export async function inviteToPersistentMeeting(meetingId: string, email: string
     p_meeting_id: meetingId,
     p_email: email,
   });
-  if (error) throw error;
+  if (error) {
+    console.error('RPC invite_to_persistent_meeting failed:', error);
+    throw error;
+  }
   return data as MeetingInvite;
 }
 
