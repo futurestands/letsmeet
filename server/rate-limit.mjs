@@ -33,7 +33,7 @@ export function createRateLimiter(options = {}) {
       multi.zremrangebyscore(fullKey, 0, windowStart);
       multi.zadd(fullKey, now, `${now}-${Math.random()}`);
       multi.zcard(fullKey);
-      multi.pexpire(fullKey, Math.ceil(windowMs / 1000) + 1); // TTL in seconds
+      multi.pexpire(fullKey, windowMs + 1000);
 
       const results = await multi.exec();
       const count = results[2][1];

@@ -42,6 +42,12 @@ export function createTokenMetrics() {
     guestSessionFailed: 0,
     moderation: 0,
     moderationDenied: 0,
+    recordingStarted: 0,
+    recordingFailed: 0,
+    aiJobQueued: 0,
+    aiJobCompleted: 0,
+    transcriptionJobQueued: 0,
+    transcriptionJobCompleted: 0,
   };
   const totalLatency = createLatencyTracker();
   const authLatency = createLatencyTracker();
@@ -90,6 +96,12 @@ export function createTokenMetrics() {
       counts.moderation += 1;
       if (!ok) counts.moderationDenied += 1;
     },
+    recordRecordingStarted() { counts.recordingStarted += 1; },
+    recordRecordingFailed() { counts.recordingFailed += 1; },
+    recordAiJobQueued() { counts.aiJobQueued += 1; },
+    recordAiJobCompleted() { counts.aiJobCompleted += 1; },
+    recordTranscriptionJobQueued() { counts.transcriptionJobQueued += 1; },
+    recordTranscriptionJobCompleted() { counts.transcriptionJobCompleted += 1; },
     snapshot,
   };
 }

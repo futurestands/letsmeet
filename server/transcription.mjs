@@ -17,6 +17,14 @@ export function transcriptionStatusPayload() {
   };
 }
 
+export const TRANSCRIPTION_STATUS = {
+  QUEUED: 'queued',
+  PROCESSING: 'processing',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  UNCONFIGURED: 'unconfigured',
+};
+
 export async function executeTranscriptionJob(job, deps = {}) {
   if (!job || !['queued', 'processing'].includes(job.status)) {
     return { completed: false, skipped: true, reason: 'Job is not executable.' };
@@ -27,7 +35,7 @@ export async function executeTranscriptionJob(job, deps = {}) {
       completed: false,
       skipped: true,
       reason: 'Transcription provider is not configured. The job remains queued.',
-      status: 'PROVIDER_REQUIRED',
+      status: TRANSCRIPTION_STATUS.UNCONFIGURED,
     };
   }
 
@@ -35,10 +43,13 @@ export async function executeTranscriptionJob(job, deps = {}) {
     return deps.executeConfigured(job);
   }
 
+  // Adapter for future providers (e.g., Deepgram, Whisper)
+  const provider = String(process.env.TRANSCRIPTION_PROVIDER || '').toLowerCase();
+
   return {
     completed: false,
     skipped: true,
-    reason: `Transcription provider "${process.env.TRANSCRIPTION_PROVIDER}" credentials are present, but no vendor adapter is enabled yet.`,
-    status: 'PROVIDER_REQUIRED',
+    reason: `Transcription provider "${provider}" credentials are present, but no vendor adapter is enabled yet.`,
+    status: TRANSCRIPTION_STATUS.UNCONFIGURED,
   };
 }

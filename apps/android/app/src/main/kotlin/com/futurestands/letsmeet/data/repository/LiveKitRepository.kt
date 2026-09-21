@@ -62,4 +62,30 @@ class LiveKitRepository(private val authRepository: AuthRepository) {
             })
         }.body()
     }
+
+    suspend fun startRecording(recordingId: String) {
+        val accessToken = authRepository.getCurrentAccessToken()
+            ?: throw IllegalStateException("Not authenticated")
+
+        client.post("$apiBaseUrl/api/recordings/start") {
+            header("Authorization", "Bearer $accessToken")
+            header("Content-Type", "application/json")
+            setBody(buildJsonObject {
+                put("recordingId", recordingId)
+            })
+        }
+    }
+
+    suspend fun stopRecording(recordingId: String) {
+        val accessToken = authRepository.getCurrentAccessToken()
+            ?: throw IllegalStateException("Not authenticated")
+
+        client.post("$apiBaseUrl/api/recordings/stop") {
+            header("Authorization", "Bearer $accessToken")
+            header("Content-Type", "application/json")
+            setBody(buildJsonObject {
+                put("recordingId", recordingId)
+            })
+        }
+    }
 }

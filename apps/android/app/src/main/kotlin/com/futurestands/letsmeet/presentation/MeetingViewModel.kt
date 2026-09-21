@@ -10,6 +10,7 @@ import com.futurestands.letsmeet.domain.model.ChatMessage
 import com.futurestands.letsmeet.domain.model.HandRaise
 import com.futurestands.letsmeet.domain.model.Meeting
 import com.futurestands.letsmeet.domain.model.MeetingReaction
+import com.futurestands.letsmeet.domain.model.MeetingRecording
 import io.github.jan.supabase.postgrest.query.filter.FilterOperation
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
@@ -42,6 +43,12 @@ class MeetingViewModel : ViewModel() {
 
     private val _handRaises = MutableStateFlow<List<HandRaise>>(emptyList())
     val handRaises: StateFlow<List<HandRaise>> = _handRaises
+
+    private val _isHost = MutableStateFlow(false)
+    val isHost: StateFlow<Boolean> = _isHost
+
+    private val _recordings = MutableStateFlow<List<MeetingRecording>>(emptyList())
+    val recordings: StateFlow<List<MeetingRecording>> = _recordings
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
@@ -77,7 +84,9 @@ class MeetingViewModel : ViewModel() {
                 val meeting = meetingRepository.getMeetingByCode(code)
                 if (meeting != null) {
                     currentMeetingId = meeting.id
+                    _isHost.value = meeting.host_id == authRepository.getCurrentUserId()
                     loadChatMessages(meeting.id)
+                    loadRecordings(meeting.id)
                     subscribeToMeetingEvents(meeting.id)
                 }
 
@@ -118,6 +127,16 @@ class MeetingViewModel : ViewModel() {
         }
     }
 
+    private fun loadRecordings(meetingId: String) {
+        viewModelScope.launch {
+            try {
+                _recordings.value = meetingRepository.getRecordings(meetingId)
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+
     private fun subscribeToMeetingEvents(meetingId: String) {
         viewModelScope.launch {
             activeChannel?.let {
@@ -142,6 +161,12 @@ class MeetingViewModel : ViewModel() {
             // Hand Raises
             val handRaiseFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
                 table = "meeting_hand_raises"
+                filter("meeting_id", FilterOperator.EQ, meetingId)
+            }
+
+            // Recordings
+            val recordingFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                table = "meeting_recordings"
                 filter("meeting_id", FilterOperator.EQ, meetingId)
             }
 
@@ -181,6 +206,22 @@ class MeetingViewModel : ViewModel() {
                     }
                 }
             }
+
+            launch {
+                recordingFlow.collect { action ->
+                    when (action) {
+                        is PostgresAction.Insert -> {
+                            val newRecording = action.decodeRecord<MeetingRecording>()
+                            _recordings.value = listOf(newRecording) + _recordings.value
+                        }
+                        is PostgresAction.Update -> {
+                            val updated = action.decodeRecord<MeetingRecording>()
+                            _recordings.value = _recordings.value.map { if (it.id == updated.id) updated else it }
+                        }
+                        else -> {}
+                    }
+                }
+            }
         }
     }
 
@@ -215,6 +256,32 @@ class MeetingViewModel : ViewModel() {
             } catch (e: Exception) {
                 _error.value = "Failed to toggle hand raise: ${e.message}"
                 isHandRaisedLocal = !isHandRaisedLocal // Revert
+            }
+        }
+    }
+
+    fun startRecording() {
+        val meetingId = currentMeetingId ?: return
+        viewModelScope.launch {
+            try {
+                val recording = meetingRepository.requestRecording(meetingId)
+                // We should refresh but realtime should also handle it.
+                // However, we need to call the server endpoint to actually START the egress if configured.
+                // We'll call LiveKitRepository.startRecording
+                liveKitRepository.startRecording(recording.id)
+            } catch (e: Exception) {
+                _error.value = "Failed to start recording: ${e.message}"
+            }
+        }
+    }
+
+    fun stopRecording(recordingId: String) {
+        viewModelScope.launch {
+            try {
+                meetingRepository.requestStopRecording(recordingId)
+                liveKitRepository.stopRecording(recordingId)
+            } catch (e: Exception) {
+                _error.value = "Failed to stop recording: ${e.message}"
             }
         }
     }

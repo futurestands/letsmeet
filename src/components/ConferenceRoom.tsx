@@ -16,6 +16,7 @@ import {
   PhoneOff,
   Smile,
   Users,
+  FiberManualRecord,
 } from 'lucide-react';
 import {
   LiveKitRoom,
@@ -126,10 +127,40 @@ function ConferenceExperience({
   const [busyControl, setBusyControl] = useState<string | null>(null);
   const [connectionRestored, setConnectionRestored] = useState(false);
   const [hostMuteNotice, setHostMuteNotice] = useState<string | null>(null);
+  const [recordings, setRecordings] = useState<MeetingRecording[]>([]);
+  const [participantCount, setParticipantCount] = useState(1);
   const lastReactionAt = useRef(0);
   const reactionNonce = useRef(0);
   const panelRef = useRef<MeetingPanel>(null);
   const isHost = meeting.host_id === user.id;
+
+  useEffect(() => {
+    const updateCount = () => {
+      setParticipantCount(room.numParticipants + 1);
+    };
+    room.on(RoomEvent.ParticipantConnected, updateCount);
+    room.on(RoomEvent.ParticipantDisconnected, updateCount);
+    updateCount();
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, updateCount);
+      room.off(RoomEvent.ParticipantDisconnected, updateCount);
+    };
+  }, [room]);
+
+  useEffect(() => {
+    void listMeetingRecordings(meeting.id).then(setRecordings).catch(() => undefined);
+    const channel = supabase
+      .channel(`recording-status:${meeting.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_recordings', filter: `meeting_id=eq.${meeting.id}` }, () => {
+        void listMeetingRecordings(meeting.id).then(setRecordings);
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [meeting.id]);
+
+  const activeRecording = recordings.find((r) => ['starting', 'active'].includes(r.status));
 
   const selectPanel = (next: MeetingPanel) => {
     panelRef.current = next;
@@ -394,9 +425,17 @@ function ConferenceExperience({
       <StartAudio label="Enable meeting audio" className="absolute left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-xl" />
 
       <header className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950/95 px-4 py-3 sm:px-6">
-        <div className="min-w-0">
-          <h1 className="truncate font-semibold">{meeting.title}</h1>
-          <p className="text-xs text-slate-400">{meeting.code}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <h1 className="truncate font-semibold">{meeting.title}</h1>
+            <p className="text-xs text-slate-400">{meeting.code} · {participantCount} {participantCount === 1 ? 'participant' : 'participants'}</p>
+          </div>
+          {activeRecording && (
+            <div className="flex items-center gap-1.5 rounded-full bg-red-600/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-400 border border-red-500/20">
+              <FiberManualRecord className="h-2.5 w-2.5 animate-pulse" />
+              Recording
+            </div>
+          )}
         </div>
         <div className="flex min-w-0 items-center gap-2 text-xs text-slate-300" aria-live="polite">
           <span className={`h-2 w-2 shrink-0 rounded-full ${connection === 'connected' || connection === 'reconnected' ? 'bg-emerald-400' : connection === 'reconnecting' ? 'bg-amber-400' : 'bg-red-400'}`} />

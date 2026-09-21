@@ -51,6 +51,8 @@ fun MeetingRoomScreen(
     val chatMessages by viewModel.chatMessages.collectAsState()
     val reactions by viewModel.reactions.collectAsState()
     val handRaises by viewModel.handRaises.collectAsState()
+    val recordings by viewModel.recordings.collectAsState()
+    val isHost by viewModel.isHost.collectAsState()
     
     var isMicEnabled by remember { mutableStateOf(true) }
     var isCameraEnabled by remember { mutableStateOf(true) }
@@ -160,6 +162,22 @@ fun MeetingRoomScreen(
                             // Tint if local hand is raised
                             tint = if (handRaises.any { it.user_id == room.localParticipant.identity?.value }) Color.Yellow else LocalContentColor.current
                         )
+                    }
+                    if (isHost) {
+                        val activeRecording = recordings.find { it.status in listOf("starting", "active") }
+                        IconButton(onClick = { 
+                            if (activeRecording != null) {
+                                viewModel.stopRecording(activeRecording.id)
+                            } else {
+                                viewModel.startRecording()
+                            }
+                        }) {
+                            Icon(
+                                if (activeRecording != null) Icons.Default.StopCircle else Icons.Default.FiberManualRecord,
+                                contentDescription = "Recording",
+                                tint = if (activeRecording != null) Color.Red else LocalContentColor.current
+                            )
+                        }
                     }
                 },
                 floatingActionButton = {

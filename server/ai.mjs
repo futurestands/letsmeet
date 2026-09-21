@@ -15,6 +15,23 @@ export function aiStatusPayload() {
   };
 }
 
+export const AI_JOB_STATUS = {
+  QUEUED: 'queued',
+  PROCESSING: 'processing',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  UNCONFIGURED: 'unconfigured',
+};
+
+export const AI_JOB_TYPES = {
+  SUMMARY: 'summary',
+  EXECUTIVE_SUMMARY: 'executive_summary',
+  ACTION_ITEMS: 'action_items',
+  DECISIONS: 'decisions',
+  TOPICS: 'topics',
+  TRANSCRIPT_QA: 'transcript_qa',
+};
+
 export async function executeAiJob(job, deps = {}) {
   if (!job || !['queued', 'processing'].includes(job.status)) {
     return { completed: false, skipped: true, reason: 'Job is not executable.' };
@@ -25,7 +42,7 @@ export async function executeAiJob(job, deps = {}) {
       completed: false,
       skipped: true,
       reason: 'AI provider is not configured. The job remains queued.',
-      status: 'PROVIDER_REQUIRED',
+      status: AI_JOB_STATUS.UNCONFIGURED,
     };
   }
 
@@ -33,10 +50,13 @@ export async function executeAiJob(job, deps = {}) {
     return deps.executeConfigured(job);
   }
 
+  // Adapter for future providers (e.g., OpenAI, Anthropic, Gemini)
+  const provider = String(process.env.AI_PROVIDER || '').toLowerCase();
+
   return {
     completed: false,
     skipped: true,
-    reason: `AI provider "${process.env.AI_PROVIDER}" credentials are present, but no vendor adapter is enabled yet.`,
-    status: 'PROVIDER_REQUIRED',
+    reason: `AI provider "${provider}" credentials are present, but no vendor adapter is enabled yet.`,
+    status: AI_JOB_STATUS.UNCONFIGURED,
   };
 }

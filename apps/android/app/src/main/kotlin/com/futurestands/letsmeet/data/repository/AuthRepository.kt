@@ -32,6 +32,10 @@ class AuthRepository {
         return auth.currentAccessTokenOrNull()
     }
 
+    fun getCurrentUserId(): String? {
+        return auth.currentUserOrNull()?.id
+    }
+
     suspend fun importSession(accessToken: String, refreshToken: String) {
         val session = UserSession(
             accessToken = accessToken,

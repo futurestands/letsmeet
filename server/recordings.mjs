@@ -21,6 +21,7 @@ export function describeRecordingDispatch(recording) {
       started: false,
       status: recording?.status ?? 'queued',
       reason: 'Object storage is not configured for LiveKit egress. The recording remains queued.',
+      providerRequired: true,
     };
   }
   if (!process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET || !process.env.LIVEKIT_HOST) {
@@ -28,12 +29,14 @@ export function describeRecordingDispatch(recording) {
       started: false,
       status: recording?.status ?? 'queued',
       reason: 'LiveKit egress is not fully configured. The recording remains queued.',
+      providerRequired: true,
     };
   }
   return {
-    started: false,
+    started: true,
     status: recording?.status ?? 'queued',
     reason: 'Storage and LiveKit are configured. The API server starts egress without marking recordings complete until LiveKit reports success.',
+    providerRequired: false,
   };
 }
 
@@ -53,7 +56,19 @@ export function createRecordingStorageAdapter() {
     bucket: process.env.RECORDING_STORAGE_BUCKET,
     region: process.env.RECORDING_STORAGE_REGION,
     objectKeyFor(recording) {
-      return `recordings/${recording.organization_id}/${recording.meeting_id}/${recording.id}.mp4`;
+      // Use ISO date folder for better organization
+      const date = new Date().toISOString().split('T')[0];
+      return `recordings/${date}/${recording.organization_id}/${recording.meeting_id}/${recording.id}.mp4`;
     },
   };
 }
+
+export const RECORDING_STATUS = {
+  QUEUED: 'queued',
+  STARTING: 'starting',
+  ACTIVE: 'active',
+  STOPPING: 'stopping',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+};

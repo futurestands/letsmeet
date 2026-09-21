@@ -63,13 +63,35 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/ready', (_req, res) => {
+app.get('/ready', async (_req, res) => {
   const dependencies = {
     supabaseAdmin: Boolean(supabaseAdmin),
     livekit: Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && livekitHost),
     guestJoin: Boolean(supabaseAdmin && supabaseUrl && supabaseAuthKey),
+    redis: Boolean(redis),
   };
-  const ready = dependencies.supabaseAdmin && dependencies.livekit;
+
+  // Probe Redis if configured
+  if (redis) {
+    try {
+      const ping = await redis.ping();
+      dependencies.redisStatus = ping === 'PONG' ? 'healthy' : 'degraded';
+    } catch (err) {
+      dependencies.redisStatus = 'down';
+    }
+  }
+
+  // Probe Supabase
+  if (supabaseAdmin) {
+    try {
+      const { error } = await supabaseAdmin.from('meetings').select('id').limit(1);
+      dependencies.supabaseStatus = error ? 'degraded' : 'healthy';
+    } catch (err) {
+      dependencies.supabaseStatus = 'down';
+    }
+  }
+
+  const ready = dependencies.supabaseAdmin && dependencies.livekit && (dependencies.supabaseStatus === 'healthy');
   res.status(ready ? 200 : 503).json({
     status: ready ? 'ready' : 'not_ready',
     dependencies,
@@ -454,58 +476,149 @@ app.post('/api/recordings/start', async (req, res) => {
       .select('id, meeting_id, organization_id, workspace_id, started_by, status')
       .eq('id', recordingId)
       .maybeSingle();
+
     if (recordingError) return res.status(500).json({ error: 'Unable to resolve the recording.' });
     if (!recording) return res.status(404).json({ error: 'Recording not found.' });
-    if (recording.started_by !== user.id) return res.status(403).json({ error: 'Only the host can start this recording.' });
+
+    // Multi-tenant authorization: Check if user is host or admin
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id });
+    if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings for this meeting.' });
+
+    if (!['queued', 'failed'].includes(recording.status)) {
+      return res.status(409).json({ error: `Recording is already in ${recording.status} state.`, status: recording.status });
+    }
 
     const { data: meeting } = await supabaseAdmin
       .from('meetings')
       .select('id, code, host_id, status')
       .eq('id', recording.meeting_id)
       .maybeSingle();
-    if (!meeting || meeting.host_id !== user.id) return res.status(403).json({ error: 'Only the host can start this recording.' });
+
+    if (!meeting || meeting.status !== 'live') {
+      return res.status(400).json({ error: 'Meeting must be live to start recording.' });
+    }
 
     const dispatch = describeRecordingDispatch(recording);
     const storage = createRecordingStorageAdapter();
-    if (!storage || !process.env.LIVEKIT_HOST || !process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+
+    if (!dispatch.started || !storage) {
       return res.status(503).json({
         ok: false,
         recordingId,
-        status: recording.status,
+        status: RECORDING_STATUS.QUEUED,
         error: dispatch.reason,
+        providerRequired: true,
       });
     }
 
     const { EgressClient } = await import('livekit-server-sdk');
     const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
-    const info = await egress.startRoomCompositeEgress(meeting.code, {
-      file: {
-        filepath: storage.objectKeyFor(recording),
-        s3: {
-          accessKey: process.env.RECORDING_STORAGE_ACCESS_KEY,
-          secret: process.env.RECORDING_STORAGE_SECRET,
-          region: process.env.RECORDING_STORAGE_REGION,
-          bucket: storage.bucket,
-        },
-      },
-    });
 
+    // Update status to starting before calling LiveKit to prevent races
     await supabaseAdmin.from('meeting_recordings').update({
-      status: 'active',
-      egress_id: String(info?.egressId ?? info?.egress_id ?? ''),
-      storage_provider: storage.provider,
-      storage_key: storage.objectKeyFor(recording),
-      started_at: new Date().toISOString(),
+      status: RECORDING_STATUS.STARTING,
+      updated_at: new Date().toISOString(),
     }).eq('id', recording.id);
 
-    return res.json({ ok: true, recordingId, status: 'active' });
+    try {
+      const info = await egress.startRoomCompositeEgress(meeting.code, {
+        file: {
+          filepath: storage.objectKeyFor(recording),
+          s3: {
+            accessKey: process.env.RECORDING_STORAGE_ACCESS_KEY,
+            secret: process.env.RECORDING_STORAGE_SECRET,
+            region: process.env.RECORDING_STORAGE_REGION,
+            bucket: storage.bucket,
+          },
+        },
+      });
+
+      await supabaseAdmin.from('meeting_recordings').update({
+        status: RECORDING_STATUS.ACTIVE,
+        egress_id: String(info?.egressId ?? info?.egress_id ?? ''),
+        storage_provider: storage.provider,
+        storage_key: storage.objectKeyFor(recording),
+        started_at: new Date().toISOString(),
+      }).eq('id', recording.id);
+
+      tokenMetrics.recordRecordingStarted();
+      return res.json({ ok: true, recordingId, status: RECORDING_STATUS.ACTIVE });
+    } catch (lkError) {
+      console.error('LiveKit egress start failed', lkError);
+      await supabaseAdmin.from('meeting_recordings').update({
+        status: RECORDING_STATUS.FAILED,
+        error: `LiveKit egress could not be started: ${lkError.message}`,
+      }).eq('id', recording.id);
+      tokenMetrics.recordRecordingFailed();
+      return res.status(502).json({ error: 'LiveKit egress could not be started.' });
+    }
   } catch (error) {
-    console.error('Failed to start recording egress', error);
-    await supabaseAdmin?.from('meeting_recordings').update({
-      status: 'failed',
-      error: 'LiveKit egress could not be started.',
-    }).eq('id', req.body?.recordingId);
-    return res.status(502).json({ error: 'LiveKit egress could not be started.' });
+    console.error('Internal recording start error', error);
+    return res.status(500).json({ error: 'Internal server error while starting recording.' });
+  }
+});
+
+app.post('/api/recordings/stop', async (req, res) => {
+  const recordingId = String(req.body?.recordingId ?? '');
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!/^[0-9a-f-]{36}$/i.test(recordingId)) return res.status(400).json({ error: 'Recording identifier is invalid.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const { data: recording, error: recordingError } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, meeting_id, status, egress_id')
+      .eq('id', recordingId)
+      .maybeSingle();
+
+    if (recordingError || !recording) return res.status(404).json({ error: 'Recording not found.' });
+
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id });
+    if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings.' });
+
+    if (recording.status === RECORDING_STATUS.COMPLETED) {
+      return res.json({ ok: true, recordingId, status: RECORDING_STATUS.COMPLETED });
+    }
+
+    if (!['starting', 'active'].includes(recording.status) || !recording.egress_id) {
+      // If it was just queued, we can cancel it
+      if (recording.status === RECORDING_STATUS.QUEUED) {
+        await supabaseAdmin.from('meeting_recordings').update({
+          status: RECORDING_STATUS.CANCELLED,
+          updated_at: new Date().toISOString(),
+        }).eq('id', recording.id);
+        return res.json({ ok: true, recordingId, status: RECORDING_STATUS.CANCELLED });
+      }
+      return res.status(409).json({ error: `Recording is in ${recording.status} state and cannot be stopped.`, status: recording.status });
+    }
+
+    const { EgressClient } = await import('livekit-server-sdk');
+    const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
+
+    await supabaseAdmin.from('meeting_recordings').update({
+      status: RECORDING_STATUS.STOPPING,
+      updated_at: new Date().toISOString(),
+    }).eq('id', recording.id);
+
+    try {
+      await egress.stopEgress(recording.egress_id);
+
+      // We don't mark as COMPLETED here yet because we should wait for LiveKit webhook
+      // or a background processor to confirm the file is in storage.
+      // But for now, we mark it as processing/stopping.
+      return res.json({ ok: true, recordingId, status: RECORDING_STATUS.STOPPING });
+    } catch (lkError) {
+      console.error('LiveKit egress stop failed', lkError);
+      // Revert to active if stop failed, or mark as failed if it's a permanent error
+      return res.status(502).json({ error: 'LiveKit egress could not be stopped.' });
+    }
+  } catch (error) {
+    console.error('Internal recording stop error', error);
+    return res.status(500).json({ error: 'Internal server error while stopping recording.' });
   }
 });
 
@@ -629,6 +742,67 @@ async function processQueuedProviderJobs() {
   }
 }
 
+app.post('/api/transcription/request', async (req, res) => {
+  const meetingId = String(req.body?.meetingId ?? '');
+  const recordingId = req.body?.recordingId ? String(req.body.recordingId) : null;
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!/^[0-9a-f-]{36}$/i.test(meetingId)) return res.status(400).json({ error: 'Meeting identifier is invalid.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const { data: transcript, error: transcriptError } = await supabaseAdmin.rpc('request_meeting_transcription', {
+      p_meeting_id: meetingId,
+      p_recording_id: recordingId,
+    });
+
+    if (transcriptError) {
+      return res.status(500).json({ error: `Unable to request transcription: ${transcriptError.message}` });
+    }
+
+    tokenMetrics.recordTranscriptionJobQueued();
+    return res.json({ ok: true, transcriptId: transcript.id, status: transcript.status });
+  } catch (error) {
+    console.error('Internal transcription request error', error);
+    return res.status(500).json({ error: 'Internal server error while requesting transcription.' });
+  }
+});
+
+app.post('/api/ai/request', async (req, res) => {
+  const meetingId = String(req.body?.meetingId ?? '');
+  const jobType = String(req.body?.jobType ?? 'summary');
+  const prompt = req.body?.prompt ? String(req.body.prompt) : null;
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!/^[0-9a-f-]{36}$/i.test(meetingId)) return res.status(400).json({ error: 'Meeting identifier is invalid.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const { data: job, error: jobError } = await supabaseAdmin.rpc('request_meeting_ai_job', {
+      p_meeting_id: meetingId,
+      p_job_type: jobType,
+      p_prompt: prompt,
+    });
+
+    if (jobError) {
+      return res.status(500).json({ error: `Unable to request AI job: ${jobError.message}` });
+    }
+
+    tokenMetrics.recordAiJobQueued();
+    return res.json({ ok: true, jobId: job.id, status: job.status });
+  } catch (error) {
+    console.error('Internal AI request error', error);
+    return res.status(500).json({ error: 'Internal server error while requesting AI job.' });
+  }
+});
 app.listen(port, () => {
   logEvent('info', 'server.listen', { port });
   console.log(`LiveKit token endpoint listening on http://localhost:${port}`);

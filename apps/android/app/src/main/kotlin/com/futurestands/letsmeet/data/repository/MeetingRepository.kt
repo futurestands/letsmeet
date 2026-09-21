@@ -3,6 +3,7 @@ package com.futurestands.letsmeet.data.repository
 import com.futurestands.letsmeet.data.SupabaseClientProvider
 import com.futurestands.letsmeet.domain.model.ChatMessage
 import com.futurestands.letsmeet.domain.model.Meeting
+import com.futurestands.letsmeet.domain.model.MeetingRecording
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,5 +72,28 @@ class MeetingRepository {
             put("p_meeting_id", meetingId)
             put("p_raised", raised)
         })
+    }
+
+    suspend fun requestRecording(meetingId: String): MeetingRecording = withContext(Dispatchers.IO) {
+        val response = postgrest.rpc("request_meeting_recording", buildJsonObject {
+            put("p_meeting_id", meetingId)
+        })
+        response.decodeSingle<MeetingRecording>()
+    }
+
+    suspend fun requestStopRecording(recordingId: String) = withContext(Dispatchers.IO) {
+        postgrest.rpc("request_stop_recording", buildJsonObject {
+            put("p_recording_id", recordingId)
+        })
+    }
+
+    suspend fun getRecordings(meetingId: String): List<MeetingRecording> = withContext(Dispatchers.IO) {
+        postgrest.from("meeting_recordings")
+            .select {
+                filter {
+                    eq("meeting_id", meetingId)
+                }
+            }
+            .decodeList<MeetingRecording>()
     }
 }
