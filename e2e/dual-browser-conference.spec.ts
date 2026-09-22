@@ -28,8 +28,8 @@ test.beforeAll(async () => {
 });
 
 test('dual-browser staging conference gate', async ({ browser }) => {
-  // Staging join + collab + reconnect routinely exceeds Playwright's 180s default under Render latency.
-  test.setTimeout(300_000);
+  // Staging join + collab + reconnect routinely takes 3-4 mins under Render / Supabase network RTT.
+  test.setTimeout(420_000);
   const ids = stagingIdentities();
   const { hostContext, participantContext, hostPage, participantPage } = await launchDualBrowser(browser);
 
@@ -58,6 +58,9 @@ test('dual-browser staging conference gate', async ({ browser }) => {
     await expect(hostPage.getByRole('button', { name: 'End meeting for everyone' })).toBeVisible();
     await expect(participantPage.getByRole('button', { name: 'End meeting for everyone' })).toHaveCount(0);
 
+    await expect.poll(async () => (await probeMedia(hostPage)).videosWithFrames, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+    await expect.poll(async () => (await probeMedia(participantPage)).videosWithFrames, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+
     const hostMedia = await probeMedia(hostPage);
     const participantMedia = await probeMedia(participantPage);
     diagnostics.hostMedia = hostMedia;
@@ -65,10 +68,6 @@ test('dual-browser staging conference gate', async ({ browser }) => {
 
     expect(hostMedia.identities.length).toBeGreaterThanOrEqual(2);
     expect(participantMedia.identities.length).toBeGreaterThanOrEqual(2);
-    expect(hostMedia.videoCount).toBeGreaterThanOrEqual(1);
-    expect(participantMedia.videoCount).toBeGreaterThanOrEqual(1);
-    expect(hostMedia.videosWithFrames).toBeGreaterThanOrEqual(1);
-    expect(participantMedia.videosWithFrames).toBeGreaterThanOrEqual(1);
     // Host must see a remote tile (two identities) for two-way video evidence.
     expect(hostMedia.identities.length).toBeGreaterThanOrEqual(2);
     await expect(hostPage.getByText('Staging Test Participant', { exact: true }).first()).toBeVisible();
@@ -100,17 +99,19 @@ test('dual-browser staging conference gate', async ({ browser }) => {
     await participantPage.getByRole('button', { name: 'Lower hand' }).click();
     diagnostics.handRaise = 'pass';
 
-    // Reactions (ephemeral data-channel overlays)
-    await participantPage.keyboard.press('Escape');
-    await participantPage.getByRole('button', { name: 'Show reactions' }).click();
-    await participantPage.getByRole('button', { name: /Send .* reaction/ }).first().click({ force: true });
-    const localReactionVisible = await participantPage.getByText('👍').first().isVisible().catch(() => false);
-    const hostReactionVisible = await hostPage.getByText('👍').first().isVisible({ timeout: 4000 }).catch(() => false);
-    diagnostics.reactions = {
-      localOverlay: localReactionVisible,
-      hostOverlay: hostReactionVisible,
-      status: 'reaction-sent',
-    };
+    // Reactions
+    const reactionsBtn = participantPage.getByRole('button', { name: 'Show reactions' });
+    const reactionMenu = participantPage.getByRole('menu');
+    if (!(await reactionMenu.isVisible().catch(() => false))) {
+      await reactionsBtn.click();
+    }
+    const emojiBtn = participantPage.getByRole('menuitem', { name: /Send .* reaction/ }).first();
+    await expect(emojiBtn).toBeVisible({ timeout: 10_000 });
+    await emojiBtn.click();
+    await expect(
+      participantPage.getByText('👍').first().or(hostPage.getByText('👍').first())
+    ).toBeVisible({ timeout: 15_000 });
+    diagnostics.reactions = 'pass';
     await participantPage.keyboard.press('Escape');
 
     // Collaboration: poll / Q&A / notes / whiteboard

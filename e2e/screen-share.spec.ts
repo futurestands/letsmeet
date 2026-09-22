@@ -9,18 +9,12 @@ import {
 
 test.describe.configure({ mode: 'serial' });
 
-/**
- * Screen-share verification using Chromium fake media / auto desktop capture flags
- * from playwright.config.ts. This proves the LiveKit screen-share control path and
- * remote "is presenting" UX when the environment can provide a capture source.
- * OS-level real desktop capture remains MANUAL REQUIRED when fake capture fails.
- */
-test('host screen share start/stop is visible to remote participant when capture is available', async ({ browser }) => {
+test('host screen share publication, remote subscription, and presentation mode DOM properties', async ({ browser }) => {
   test.setTimeout(240_000);
   const ids = stagingIdentities();
   const { hostContext, participantContext, hostPage, participantPage } = await launchDualBrowser(browser);
   const diagnostics: Record<string, unknown> = {
-    method: 'Playwright fake-device / auto desktop capture flags',
+    method: 'Playwright dual-browser screen-share verification',
   };
 
   try {
@@ -34,36 +28,50 @@ test('host screen share start/stop is visible to remote participant when capture
     await expect(participantPage.getByRole('region', { name: 'Participant stage' })).toBeVisible({ timeout: 120_000 });
     await waitForRemoteParticipantTiles(hostPage, 2);
 
+    // Attempt to start screen share
     await hostPage.getByRole('button', { name: 'Share screen' }).click();
     const stopShare = hostPage.getByRole('button', { name: 'Stop screen sharing' });
-    const presenting = participantPage.getByText(/is presenting/i);
-    const stage = participantPage.locator('[data-screen-share-stage="true"]');
+    const hostStarted = await stopShare.isVisible({ timeout: 15_000 }).catch(() => false);
 
-    const hostStarted = await stopShare.isVisible().catch(() => false);
-    const remoteSees = (await presenting.isVisible().catch(() => false))
-      || (await stage.isVisible().catch(() => false));
-    if (!hostStarted && !remoteSees) {
-      diagnostics.screenShare = 'unverified-automation-capture-source-limitation';
+    if (!hostStarted) {
+      diagnostics.screenShare = 'MANUAL REQUIRED — OS screen capture unavailable in automation environment';
       assertNoSecretLeak(JSON.stringify(diagnostics));
-      test.info().annotations.push({
-        type: 'note',
-        description: 'Fake capture did not produce a LiveKit screen-share track; OS capture remains MANUAL REQUIRED.',
-      });
-      return;
+      console.log(JSON.stringify({ screenShareE2E: diagnostics }));
+      throw new Error('MANUAL REQUIRED — OS screen capture unavailable in automation environment.');
     }
 
-    diagnostics.hostControl = hostStarted ? 'stop-visible' : 'share-attempted';
-    diagnostics.remoteVisibility = remoteSees ? 'pass' : 'host-started-remote-unconfirmed';
+    diagnostics.localPublication = 'published';
 
-    // Cameras/audio controls remain available during share.
+    // Verify remote participant received screen share track & stage rendered
+    const remoteStage = participantPage.locator('[data-screen-share-stage="true"]');
+    await expect(remoteStage).toBeVisible({ timeout: 30_000 });
+    await expect(participantPage.getByText(/is presenting/i)).toBeVisible({ timeout: 30_000 });
+    diagnostics.remoteSubscription = 'rendered';
+
+    // Verify DOM computed styles on remote screen-share video element
+    const remoteVideo = remoteStage.locator('video').first();
+    if (await remoteVideo.isVisible().catch(() => false)) {
+      const styles = await remoteVideo.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        return {
+          transform: computed.transform,
+          objectFit: computed.objectFit,
+        };
+      });
+      diagnostics.remoteVideoStyles = styles;
+      expect(styles.transform).not.toContain('matrix(-1'); // Confirm no scaleX(-1) mirror
+      expect(styles.objectFit).toBe('contain');
+    }
+
+    // Camera/mic controls remain accessible
     await expect(hostPage.getByRole('button', { name: /Mute microphone|Unmute microphone/ })).toBeVisible();
     await expect(participantPage.getByRole('button', { name: /Mute microphone|Unmute microphone/ })).toBeVisible();
 
-    if (await stopShare.isVisible().catch(() => false)) {
-      await stopShare.click();
-      await expect(hostPage.getByRole('button', { name: 'Share screen' })).toBeVisible({ timeout: 20_000 });
-      diagnostics.stopShare = 'pass';
-    }
+    // Stop screen share and verify stage unmounts
+    await stopShare.click();
+    await expect(hostPage.getByRole('button', { name: 'Share screen' })).toBeVisible({ timeout: 20_000 });
+    await expect(remoteStage).not.toBeVisible({ timeout: 20_000 });
+    diagnostics.stopShare = 'pass';
 
     assertNoSecretLeak(JSON.stringify(diagnostics));
     console.log(JSON.stringify({ screenShareE2E: diagnostics }));
