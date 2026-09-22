@@ -195,8 +195,8 @@ function ConferenceExperience({
 
   const onDataMessage = useCallback((message: { payload: Uint8Array; from?: { identity: string } }) => {
     const event = decodeConferenceEvent(message.payload);
-    const identity = message.from?.identity;
-    if (!event || !identity) return;
+    const identity = message.from?.identity || 'remote-participant';
+    if (!event) return;
 
     if (event.type === 'hand') {
       setRaisedHands((current) => updateRaisedHands(current, identity, event.raised));

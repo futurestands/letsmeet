@@ -26,11 +26,15 @@ test('reactions - participant sends emoji reaction and overlay is visibly receiv
 
     const emojiBtn = participantPage.getByRole('menuitem', { name: /Send .* reaction/ }).first();
     await expect(emojiBtn).toBeVisible({ timeout: 15_000 });
-    await emojiBtn.click({ force: true });
+    await emojiBtn.dispatchEvent('click');
 
-    // Strict assertion: reaction overlay MUST be visibly rendered in DOM
-    const overlay = participantPage.getByTestId('reaction-overlay').first();
-    await expect(overlay).toBeVisible({ timeout: 15_000 });
+    // Strict assertion: reaction overlay MUST be visibly rendered in DOM on both local sender and remote host
+    const localOverlay = participantPage.getByTestId('reaction-overlay').first();
+    await expect(localOverlay).toBeVisible({ timeout: 15_000 });
+
+    const hostOverlay = hostPage.getByTestId('reaction-overlay').first();
+    await expect(hostOverlay).toBeVisible({ timeout: 15_000 });
+    diagnostics.remoteOverlayReceived = true;
     diagnostics.actionMs = Date.now() - actionStart;
     diagnostics.status = 'pass';
 

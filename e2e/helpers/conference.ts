@@ -78,17 +78,17 @@ export async function hostStartMeeting(page: Page): Promise<string> {
   await startLive.click();
 
   const stage = page.getByRole('region', { name: 'Participant stage' });
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
     if (await stage.isVisible().catch(() => false)) break;
+    const startLive = page.getByRole('button', { name: 'Start meeting', exact: true });
+    if (await startLive.isVisible().catch(() => false)) {
+      await startLive.click();
+    }
     const tryAgain = page.getByRole('button', { name: 'Try again' });
     if (await tryAgain.isVisible().catch(() => false)) {
       await tryAgain.click();
     }
-    const startAgain = page.getByRole('button', { name: 'Start meeting', exact: true });
-    if (await startAgain.isVisible().catch(() => false)) {
-      await startAgain.click();
-    }
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
   }
   await expect(stage).toBeVisible({ timeout: 90_000 });
   const match = page.url().match(/LM-[A-Z0-9]{6}/);

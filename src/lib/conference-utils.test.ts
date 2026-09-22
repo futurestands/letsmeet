@@ -99,6 +99,7 @@ describe('conference utilities', () => {
   });
 
   it('rate-limits reactions', () => {
+    expect(shouldAllowReaction(0, 500)).toBe(true);
     expect(shouldAllowReaction(1000, 1500)).toBe(false);
     expect(shouldAllowReaction(1000, 1800)).toBe(true);
   });
