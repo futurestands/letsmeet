@@ -26,15 +26,23 @@ export async function launchDualBrowser(browser: Browser) {
   return { hostContext, participantContext, hostPage, participantPage };
 }
 
-export async function signIn(page: Page, email: string, password: string) {
-  await page.goto('/#/auth', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('textbox', { name: 'Email' }).fill(email);
-  await page.getByRole('textbox', { name: 'Password' }).fill(password);
-  await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-  await expect(page).toHaveURL(/#\/(?:$|home)?/, { timeout: 45_000 });
-  await expect(page.getByRole('button', { name: /Start (a )?meeting|Start Meeting/i }).first()).toBeVisible({
-    timeout: 45_000,
-  });
+export async function signIn(page: Page, email: string, password: string, retries = 3) {
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      await page.goto('/#/auth', { waitUntil: 'domcontentloaded' });
+      await page.getByRole('textbox', { name: 'Email' }).fill(email);
+      await page.getByRole('textbox', { name: 'Password' }).fill(password);
+      await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+      await expect(page).toHaveURL(/#\/(?:$|home)?/, { timeout: 45_000 });
+      await expect(page.getByRole('button', { name: /Start (a )?meeting|Start Meeting/i }).first()).toBeVisible({
+        timeout: 45_000,
+      });
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * (i + 1)));
+    }
+  }
 }
 
 export async function hostStartMeeting(page: Page): Promise<string> {
