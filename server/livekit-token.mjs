@@ -463,9 +463,7 @@ app.post('/api/livekit/moderate', async (req, res) => {
         canPublishData: true,
       });
     } else {
-      await roomService.removeParticipant(room, targetIdentity, {
-        revokeTokenTs: BigInt(Math.floor(Date.now() / 1000)),
-      });
+      await roomService.removeParticipant(room, targetIdentity);
     }
 
     tokenMetrics.recordModeration(true);
