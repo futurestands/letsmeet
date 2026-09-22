@@ -242,12 +242,16 @@ function ConferenceExperience({
   }, [addReaction, meeting.id, refreshMessages, user.id]);
 
   useEffect(() => {
-    if (connectionState === ConnectionState.Connected && settings.audioOutputDeviceId) {
+    if (
+      connectionState === ConnectionState.Connected &&
+      settings.audioOutputDeviceId &&
+      devices.outputSelectionSupported
+    ) {
       void room.switchActiveDevice('audiooutput', settings.audioOutputDeviceId).catch(() => {
-        setActionError('The selected speaker could not be activated.');
+        // Speaker device switching failed on a supported browser
       });
     }
-  }, [connectionState, room, settings.audioOutputDeviceId]);
+  }, [connectionState, devices.outputSelectionSupported, room, settings.audioOutputDeviceId]);
 
   useEffect(() => {
     let timer: number | undefined;
@@ -283,9 +287,13 @@ function ConferenceExperience({
     try {
       setActionError(null);
       setHostMuteNotice(null);
-      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, {
-        deviceId: settings.audioDeviceId || undefined,
-      });
+      try {
+        await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled, {
+          deviceId: settings.audioDeviceId || undefined,
+        });
+      } catch {
+        await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+      }
     } catch {
       setActionError('The microphone could not be changed. Check browser permissions and the selected device.');
     }
@@ -294,10 +302,14 @@ function ConferenceExperience({
   const toggleCamera = async () => {
     try {
       setActionError(null);
-      await localParticipant.setCameraEnabled(!isCameraEnabled, {
-        deviceId: settings.videoDeviceId || undefined,
-        resolution: VideoPresets.h720.resolution,
-      });
+      try {
+        await localParticipant.setCameraEnabled(!isCameraEnabled, {
+          deviceId: settings.videoDeviceId || undefined,
+          resolution: VideoPresets.h720.resolution,
+        });
+      } catch {
+        await localParticipant.setCameraEnabled(!isCameraEnabled);
+      }
     } catch {
       setActionError('The camera could not be changed. Check browser permissions and the selected device.');
     }

@@ -43,13 +43,16 @@ async function run() {
   console.log('================================================================\n');
 
   // Create Users
-  const { data: hostAuth } = await supabaseAdmin.auth.admin.createUser({ email: hostEmail, password, email_confirm: true });
+  const { data: hostAuth, error: hostAuthErr } = await supabaseAdmin.auth.admin.createUser({ email: hostEmail, password, email_confirm: true });
+  if (hostAuthErr || !hostAuth?.user) throw hostAuthErr ?? new Error('Failed to create host test user');
   const hostId = hostAuth.user.id;
 
-  const { data: guestAuth } = await supabaseAdmin.auth.admin.createUser({ email: guestEmail, password, email_confirm: true });
+  const { data: guestAuth, error: guestAuthErr } = await supabaseAdmin.auth.admin.createUser({ email: guestEmail, password, email_confirm: true });
+  if (guestAuthErr || !guestAuth?.user) throw guestAuthErr ?? new Error('Failed to create guest test user');
   const guestId = guestAuth.user.id;
 
-  const { data: outsiderAuth } = await supabaseAdmin.auth.admin.createUser({ email: outsiderEmail, password, email_confirm: true });
+  const { data: outsiderAuth, error: outsiderAuthErr } = await supabaseAdmin.auth.admin.createUser({ email: outsiderEmail, password, email_confirm: true });
+  if (outsiderAuthErr || !outsiderAuth?.user) throw outsiderAuthErr ?? new Error('Failed to create outsider test user');
   const outsiderId = outsiderAuth.user.id;
 
   const hostClient = createClient(supabaseUrl, supabaseAnonKey);

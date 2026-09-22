@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Crown, Hand, MicOff, Pin, PinOff, UserMinus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Crown, Eye, EyeOff, Hand, MicOff, Pin, PinOff, UserMinus } from 'lucide-react';
 import { ParticipantTile, useSpeakingParticipants, useTracks } from '@livekit/components-react';
 import { RemoteTrackPublication, Track, VideoQuality } from 'livekit-client';
 import {
@@ -35,6 +35,7 @@ const ParticipantGrid = memo(function ParticipantGrid({
 }: ParticipantGridProps) {
   const [page, setPage] = useState(0);
   const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
+  const [showParticipantsInPresentation, setShowParticipantsInPresentation] = useState(true);
   const manualPageUntil = useRef(0);
   const activeSpeakers = useSpeakingParticipants();
   const speakerIdentities = useMemo(
@@ -148,15 +149,37 @@ const ParticipantGrid = memo(function ParticipantGrid({
         <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-2 sm:p-4" data-screen-share-stage="true">
           <div className="relative h-full w-full max-w-7xl overflow-hidden rounded-2xl border border-blue-500/30 bg-black flex items-center justify-center">
             <ParticipantTile trackRef={screenShares[0]} className="h-full w-full object-contain" data-lk-source="screen_share" />
-            <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-full bg-slate-950/80 px-3 py-1.5 text-xs font-semibold text-blue-200 backdrop-blur-md">
-              <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
-              {presenterName} is presenting
+
+            {/* Presentation Controls Overlay */}
+            <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full bg-slate-950/85 px-3 py-1.5 text-xs font-semibold text-blue-200 border border-blue-500/30 backdrop-blur-md shadow-lg">
+                <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+                <span>{presenterName} is presenting</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowParticipantsInPresentation((prev) => !prev)}
+                className="flex items-center gap-1.5 rounded-full bg-slate-950/85 px-3 py-1.5 text-xs font-medium text-white border border-slate-700 hover:bg-slate-800 transition focus:outline-none focus:ring-2 focus:ring-blue-400 backdrop-blur-md shadow-lg cursor-pointer pointer-events-auto"
+                aria-label={showParticipantsInPresentation ? 'Hide participants strip' : 'Show participants strip'}
+              >
+                {showParticipantsInPresentation ? (
+                  <>
+                    <EyeOff className="h-3.5 w-3.5" />
+                    <span>Hide participants</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Show participants ({visibleTracks.length})</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
 
         {/* Non-colliding Horizontal Strip for Camera Tiles */}
-        {visibleTracks.length > 0 && (
+        {showParticipantsInPresentation && visibleTracks.length > 0 && (
           <div className="flex shrink-0 items-center gap-2.5 overflow-x-auto border-t border-slate-800 bg-slate-950/90 p-2 sm:p-3 max-h-36 sm:max-h-44 scrollbar-thin">
             {visibleTracks.map((trackRef) => {
               const participant = trackRef.participant;
