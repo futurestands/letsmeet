@@ -57,10 +57,18 @@ function report(name, ok, detail = '') {
   if (!ok) failed += 1;
 }
 
-async function signIn(client, email, password) {
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error || !data.user) throw error ?? new Error('sign-in failed');
-  return data.user;
+async function signIn(client, email, password, retries = 3) {
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
+      if (!error && data.user) return data.user;
+      if (i === retries - 1) throw error ?? new Error('sign-in failed');
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  throw new Error('sign-in failed');
 }
 
 const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);

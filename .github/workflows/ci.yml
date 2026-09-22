@@ -7,7 +7,8 @@ on:
   pull_request:
 
 jobs:
-  app:
+  deterministic-checks:
+    name: Deterministic PR Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +22,7 @@ jobs:
       - run: npm run build
       - run: npm run test:rate-limit
       - run: npm run test:notifications
-      - run: node scripts/phase3-livekit-endpoint-test.mjs
+      - run: node scripts/token-metrics-test.mjs
       - name: Secret scan
         run: |
           if git ls-files | grep -E '(^|/)\.env$' || git ls-files | grep -E '(^|/)\.env\.(local|staging\.local)$'; then
@@ -34,7 +35,39 @@ jobs:
           fi
           echo "No tracked env files or obvious secret material"
         shell: bash
-      - name: Note Windows-only DB suites
-        run: echo "phase2-6 PostgreSQL security suites require local/Windows Postgres and are executed outside GitHub Actions."
-      - name: Note staging dual-browser E2E
-        run: echo "Playwright dual-browser E2E (npm run test:e2e:dual) requires staging secrets and system Chrome; run locally/CI with secrets, not on PRs from forks."
+
+  staging-integration-security:
+    name: Protected Staging Security Integration
+    needs: deterministic-checks
+    if: github.ref == 'refs/heads/phase-1-saas-foundation' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Execute Staging Security & Onboarding Integration Harness
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VITE_LIVEKIT_TOKEN_ENDPOINT: ${{ secrets.VITE_LIVEKIT_TOKEN_ENDPOINT }}
+          VITE_LIVEKIT_URL: ${{ secrets.VITE_LIVEKIT_URL }}
+          LIVEKIT_HOST: ${{ secrets.LIVEKIT_HOST }}
+          STAGING_TEST_HOST_EMAIL: ${{ secrets.STAGING_TEST_HOST_EMAIL }}
+          STAGING_TEST_HOST_PASSWORD: ${{ secrets.STAGING_TEST_HOST_PASSWORD }}
+          STAGING_TEST_PARTICIPANT_EMAIL: ${{ secrets.STAGING_TEST_PARTICIPANT_EMAIL }}
+          STAGING_TEST_PARTICIPANT_PASSWORD: ${{ secrets.STAGING_TEST_PARTICIPANT_PASSWORD }}
+        run: |
+          if [ -n "$VITE_SUPABASE_URL" ]; then
+            node scripts/verify-staging-migrations.mjs
+            node scripts/verify-all-sprint-objectives.mjs
+            node scripts/staging-token-acceptance.mjs
+            node scripts/staging-invitation-e2e.mjs
+          else
+            echo "Staging secrets not configured in repository environment. Skipped runtime staging execution."
+          fi

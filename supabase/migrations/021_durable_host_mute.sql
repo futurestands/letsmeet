@@ -1,4 +1,4 @@
--- Fix host mute durability: preserve 'muted' status across joins, share-link joins, and reconnects.
+-- Fix host mute & waiting room durability: preserve 'muted' and 'waiting' status across joins, share-link joins, and reconnects.
 -- Also align moderate_persistent_participant RPC with unmute and admit actions.
 
 CREATE OR REPLACE FUNCTION public.moderate_persistent_participant(
@@ -153,7 +153,9 @@ BEGIN
   ON CONFLICT ON CONSTRAINT meeting_participants_meeting_user_key DO UPDATE
     SET user_name = EXCLUDED.user_name,
         status = CASE
-          WHEN public.meeting_participants.status IN ('removed', 'muted') THEN public.meeting_participants.status
+          WHEN public.meeting_participants.status IN ('removed', 'muted', 'waiting')
+               AND v_meeting.host_id IS DISTINCT FROM v_user_id
+            THEN public.meeting_participants.status
           WHEN v_meeting.host_id = v_user_id THEN 'joined'
           WHEN v_meeting.status = 'live' THEN 'joined'
           ELSE 'waiting'
@@ -282,7 +284,8 @@ BEGIN
   ON CONFLICT ON CONSTRAINT meeting_participants_meeting_user_key DO UPDATE
     SET user_name = EXCLUDED.user_name,
         status = CASE
-          WHEN public.meeting_participants.status IN ('removed', 'muted') THEN public.meeting_participants.status
+          WHEN public.meeting_participants.status IN ('removed', 'muted', 'waiting')
+            THEN public.meeting_participants.status
           WHEN v_meeting.status = 'live' THEN 'joined'
           ELSE 'waiting'
         END,
