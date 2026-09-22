@@ -336,11 +336,12 @@ function ConferenceExperience({
     }
   };
 
-  const sendReaction = async (emoji: string, eventTimestamp: number) => {
-    if (!shouldAllowReaction(lastReactionAt.current, eventTimestamp)) return;
-    lastReactionAt.current = eventTimestamp;
+  const sendReaction = useCallback(async (emoji: string) => {
+    const now = Date.now();
+    if (!shouldAllowReaction(lastReactionAt.current, now)) return;
+    lastReactionAt.current = now;
     reactionNonce.current += 1;
-    const nonce = `${Math.floor(eventTimestamp)}-${reactionNonce.current}`;
+    const nonce = `${now}-${reactionNonce.current}`;
     addReaction(user.id, emoji, `${user.id}-${nonce}`);
     try {
       await sendMeetingReaction(meeting.id, emoji);
@@ -349,7 +350,7 @@ function ConferenceExperience({
       setActionError('The reaction could not be saved.');
     }
     setShowReactions(false);
-  };
+  }, [addReaction, meeting.id, sendEvent, user.id]);
 
   const sendChat = async (message: string) => {
     try {
@@ -504,16 +505,16 @@ function ConferenceExperience({
         )}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-24 z-30 flex items-end justify-center gap-3 px-4">
+      <div className="pointer-events-none absolute inset-x-0 bottom-24 z-[90] flex items-end justify-center gap-3 px-4">
         {reactions.map((reaction) => (
-          <div key={reaction.id} className="animate-bounce rounded-full bg-slate-900/90 px-3 py-2 text-center shadow-xl">
+          <div key={reaction.id} className="animate-bounce rounded-full bg-slate-900/90 px-3 py-2 text-center shadow-xl" data-testid="reaction-overlay">
             <span className="text-2xl">{reaction.emoji}</span>
             <span className="ml-2 text-xs text-slate-300">{reaction.name}</span>
           </div>
         ))}
       </div>
 
-      <footer className="relative z-40 flex shrink-0 items-center justify-start gap-2 overflow-x-auto border-t border-slate-800 bg-slate-950 px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-center sm:gap-3 sm:px-6">
+      <footer className="relative z-[100] flex shrink-0 items-center justify-start gap-2 overflow-x-auto border-t border-slate-800 bg-slate-950 px-2 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-center sm:gap-3 sm:px-6">
         <button onClick={() => void toggleMicrophone()} className={`meeting-control ${isMicrophoneEnabled ? '' : 'meeting-control-off'}`} aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'} title={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'}>
           {isMicrophoneEnabled ? <Mic /> : <MicOff />}
         </button>
@@ -552,10 +553,10 @@ function ConferenceExperience({
             <Smile />
           </button>
           {showReactions && (
-            <div role="menu" className="absolute bottom-16 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
+            <div role="menu" className="fixed bottom-20 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap justify-center gap-1 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl">
               <p className="w-full px-2 pb-1 text-center text-[10px] text-slate-400">Reactions are short-lived overlays for everyone in the call.</p>
               {REACTIONS.map((emoji) => (
-                <button key={emoji} role="menuitem" onClick={(event) => void sendReaction(emoji, event.timeStamp)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
+                <button key={emoji} role="menuitem" onClick={() => void sendReaction(emoji)} className="rounded-xl p-2 text-2xl hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer pointer-events-auto" aria-label={`Send ${emoji} reaction`}>{emoji}</button>
               ))}
             </div>
           )}
@@ -566,7 +567,7 @@ function ConferenceExperience({
             <MoreHorizontal />
           </button>
           {showDevices && (
-            <div role="dialog" aria-label="Device settings" className="absolute bottom-16 right-0 z-50 w-[min(18rem,calc(100vw-1.5rem))] space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
+            <div role="dialog" aria-label="Device settings" className="fixed bottom-20 right-4 z-50 w-[min(18rem,calc(100vw-1.5rem))] space-y-3 rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm shadow-2xl">
               {[
                 { label: 'Microphone', kind: 'audioinput' as const, items: devices.microphones },
                 { label: 'Camera', kind: 'videoinput' as const, items: devices.cameras },

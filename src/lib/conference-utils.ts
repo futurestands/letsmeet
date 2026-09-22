@@ -143,6 +143,7 @@ export function mediaErrorMessage(error: unknown): string {
 }
 
 export function shouldAllowReaction(lastSentAt: number, now: number, minimumIntervalMs = 800): boolean {
+  if (lastSentAt === 0) return true;
   return now - lastSentAt >= minimumIntervalMs;
 }
 

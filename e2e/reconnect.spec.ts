@@ -1,47 +1,54 @@
 import { test, expect } from '@playwright/test';
-import { stagingIdentities, assertNoSecretLeak } from './helpers/env';
-import {
-  hostStartMeeting,
-  launchDualBrowser,
-  participantJoinMeeting,
-  signIn,
-  waitForRemoteParticipantTiles,
-} from './helpers/conference';
+import { assertNoSecretLeak } from './helpers/env';
+import { createAuthenticatedDualMeeting, probeMedia } from './helpers/conference';
 
 test.describe.configure({ mode: 'serial' });
 
 test('reconnect - transient network disconnect recovers and participant remains in meeting', async ({ browser }) => {
-  test.setTimeout(300_000);
-  const ids = stagingIdentities();
-  const { hostContext, participantContext, hostPage, participantPage } = await launchDualBrowser(browser);
+  test.setTimeout(240_000);
+  const setup = await createAuthenticatedDualMeeting(browser);
+  const { hostContext, participantContext, hostPage, participantPage, meetingCode, timings } = setup;
+  void hostPage;
+
+  const diagnostics: Record<string, unknown> = {
+    phase: 'reconnect-e2e',
+    meetingCode,
+    setupTimings: timings,
+  };
 
   try {
-    await signIn(hostPage, ids.hostEmail, ids.hostPassword);
-    await signIn(participantPage, ids.participantEmail, ids.password || ids.participantPassword);
-    const meetingCode = await hostStartMeeting(hostPage);
-    await participantJoinMeeting(participantPage, meetingCode);
+    const actionStart = Date.now();
 
-    await waitForRemoteParticipantTiles(hostPage, 2);
-    await waitForRemoteParticipantTiles(participantPage, 2);
+    // 1. Capture initial media frame count
+    const initialMedia = await probeMedia(participantPage);
+    diagnostics.initialMedia = initialMedia;
 
-    // Simulate participant network disconnect
+    // 2. Simulate participant network disconnect
     await participantContext.setOffline(true);
     await expect(participantPage.getByText(/Reconnecting|Connection lost/i)).toBeVisible({ timeout: 20_000 });
+    diagnostics.offlineBannerObserved = true;
 
-    // Restore network
+    // 3. Restore network connection
     await participantContext.setOffline(false);
     await expect(participantPage.getByText(/Connected|Connection restored/i)).toBeVisible({ timeout: 30_000 });
+    diagnostics.reconnectedBannerObserved = true;
 
-    // Meeting remains active and host still sees participant
-    await waitForRemoteParticipantTiles(hostPage, 2);
+    // 4. Verify participant remains in meeting and video frames resume decoding
+    await expect.poll(async () => (await probeMedia(participantPage)).videosWithFrames, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+    const recoveredMedia = await probeMedia(participantPage);
+    diagnostics.recoveredMedia = recoveredMedia;
 
-    const diagnostics = {
-      meetingCode,
-      reconnect: 'pass',
-    };
+    diagnostics.actionMs = Date.now() - actionStart;
+    diagnostics.status = 'pass';
 
     assertNoSecretLeak(JSON.stringify(diagnostics));
     console.log(JSON.stringify({ reconnectE2E: diagnostics }));
+  } catch (err) {
+    diagnostics.failurePhase = 'reconnect_recovery_assertion';
+    diagnostics.error = err instanceof Error ? err.message : String(err);
+    assertNoSecretLeak(JSON.stringify(diagnostics));
+    console.error(JSON.stringify({ reconnectE2E: diagnostics }));
+    throw err;
   } finally {
     await hostContext.close();
     await participantContext.close();

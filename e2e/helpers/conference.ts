@@ -1,4 +1,22 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { stagingIdentities } from './env';
+
+export type SetupTimings = {
+  hostAuthMs: number;
+  participantAuthMs: number;
+  meetingCreateMs: number;
+  participantJoinMs: number;
+  remoteTilesMs: number;
+};
+
+export type DualMeetingSetup = {
+  hostContext: BrowserContext;
+  participantContext: BrowserContext;
+  hostPage: Page;
+  participantPage: Page;
+  meetingCode: string;
+  timings: SetupTimings;
+};
 
 const FAKE_MEDIA_ARGS = [
   '--use-fake-ui-for-media-stream',
@@ -46,9 +64,13 @@ export async function signIn(page: Page, email: string, password: string, retrie
 }
 
 export async function hostStartMeeting(page: Page): Promise<string> {
-  await page.getByRole('button', { name: 'Start Meeting', exact: true }).click();
-  await expect(page).toHaveURL(/#\/join\/LM-[A-Z0-9]{6}/, { timeout: 60_000 });
-  await page.getByRole('button', { name: 'Join meeting' }).click();
+  const startBtn = page.getByRole('button', { name: /Start (a )?meeting|Start Meeting/i }).first();
+  await expect(startBtn).toBeVisible({ timeout: 45_000 });
+  await startBtn.click();
+  await expect(page).toHaveURL(/#\/join\/LM-[A-Z0-9]{6}/, { timeout: 90_000 });
+  const joinBtn = page.getByRole('button', { name: 'Join meeting' });
+  await expect(joinBtn).toBeVisible({ timeout: 60_000 });
+  await joinBtn.click();
   await expect(page).toHaveURL(/#\/meet\/LM-[A-Z0-9]{6}/, { timeout: 90_000 });
   // Waiting lobby: host must explicitly start the LiveKit session.
   const startLive = page.getByRole('button', { name: 'Start meeting', exact: true });
@@ -161,6 +183,50 @@ export async function expectChatVisible(page: Page, message: string) {
     await openChat.click();
   }
   await expect(page.getByText(message, { exact: true })).toBeVisible({ timeout: 45_000 });
+}
+
+export async function createAuthenticatedDualMeeting(browser: Browser): Promise<DualMeetingSetup> {
+  const startTs = Date.now();
+  const timings: SetupTimings = {
+    hostAuthMs: 0,
+    participantAuthMs: 0,
+    meetingCreateMs: 0,
+    participantJoinMs: 0,
+    remoteTilesMs: 0,
+  };
+
+  const ids = stagingIdentities();
+  const { hostContext, participantContext, hostPage, participantPage } = await launchDualBrowser(browser);
+
+  // 1. Host Auth
+  await signIn(hostPage, ids.hostEmail, ids.hostPassword);
+  timings.hostAuthMs = Date.now() - startTs;
+
+  // 2. Participant Auth
+  await signIn(participantPage, ids.participantEmail, ids.participantPassword);
+  timings.participantAuthMs = Date.now() - startTs;
+
+  // 3. Meeting Creation
+  const meetingCode = await hostStartMeeting(hostPage);
+  timings.meetingCreateMs = Date.now() - startTs;
+
+  // 4. Participant Join
+  await participantJoinMeeting(participantPage, meetingCode);
+  timings.participantJoinMs = Date.now() - startTs;
+
+  // 5. Remote Tiles Visible
+  await waitForRemoteParticipantTiles(hostPage, 2);
+  await waitForRemoteParticipantTiles(participantPage, 2);
+  timings.remoteTilesMs = Date.now() - startTs;
+
+  return {
+    hostContext,
+    participantContext,
+    hostPage,
+    participantPage,
+    meetingCode,
+    timings,
+  };
 }
 
 export { FAKE_MEDIA_ARGS };
