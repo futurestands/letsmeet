@@ -28,24 +28,42 @@ function report(name, ok, extra = '') {
   if (!ok) process.exitCode = 1;
 }
 
-async function signIn(client, email, password) {
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error || !data.session?.access_token || !data.user) throw error ?? new Error('Sign-in failed');
-  return { token: data.session.access_token, user: data.user };
+async function signIn(client, email, password, retries = 3) {
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      const { data, error } = await client.auth.signInWithPassword({ email, password });
+      if (!error && data.session?.access_token && data.user) {
+        return { token: data.session.access_token, user: data.user };
+      }
+      if (i === retries - 1) throw error ?? new Error('Sign-in failed');
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  throw new Error('Sign-in failed');
 }
 
-async function requestToken({ accessToken, room, originHeader = origin, extraQuery = '' }) {
+async function requestToken({ accessToken, room, originHeader = origin, extraQuery = '' }, retries = 3) {
   const headers = { Origin: originHeader, Accept: 'application/json' };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   const url = `${tokenUrl}?room=${encodeURIComponent(room)}${extraQuery}`;
-  const response = await fetch(url, { headers });
-  let payload = {};
-  try {
-    payload = await response.json();
-  } catch {
-    payload = {};
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      const response = await fetch(url, { headers });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = {};
+      }
+      return { status: response.status, payload };
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * (i + 1)));
+    }
   }
-  return { status: response.status, payload };
+  return { status: 500, payload: {} };
 }
 
 const unauth = await requestToken({ room: 'INVALID' });

@@ -249,6 +249,21 @@ export function shouldShowConnectionBanner(state: ConferenceConnectionState): bo
     || state === 'failed';
 }
 
+export function isVideoTrackSourceScreenShare(source?: string | null): boolean {
+  if (!source) return false;
+  const str = String(source).toLowerCase();
+  return str === 'screen_share' || str === 'screen_share_audio' || str === 'screenshare';
+}
+
+export function videoTransformStyle(input: { isLocal: boolean; isScreenShare: boolean }): 'none' | 'scaleX(-1)' {
+  if (input.isScreenShare) return 'none';
+  return input.isLocal ? 'scaleX(-1)' : 'none';
+}
+
+export function videoObjectFitStyle(isScreenShare: boolean): 'contain' | 'cover' {
+  return isScreenShare ? 'contain' : 'cover';
+}
+
 export function nextLiveKitTokenRefreshDelayMs(
   issuedAtMs: number,
   nowMs: number,

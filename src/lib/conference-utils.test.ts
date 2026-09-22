@@ -23,6 +23,9 @@ import {
   shouldShowConnectionBanner,
   updateRaisedHands,
   visibleParticipantRange,
+  isVideoTrackSourceScreenShare,
+  videoTransformStyle,
+  videoObjectFitStyle,
 } from './conference-utils';
 
 describe('conference utilities', () => {
@@ -152,6 +155,16 @@ describe('conference utilities', () => {
     expect(liveKitReconnectDelayMs(0)).toBe(500);
     expect(liveKitReconnectDelayMs(11)).toBeNull();
     expect(nextLiveKitTokenRefreshDelayMs(0, 0, 3600, 600)).toBe(3_000_000);
+  });
+
+  it('enforces unmirrored contain transforms for screen shares and mirrored transforms for local camera', () => {
+    expect(isVideoTrackSourceScreenShare('screen_share')).toBe(true);
+    expect(isVideoTrackSourceScreenShare('camera')).toBe(false);
+    expect(videoTransformStyle({ isLocal: true, isScreenShare: true })).toBe('none');
+    expect(videoTransformStyle({ isLocal: true, isScreenShare: false })).toBe('scaleX(-1)');
+    expect(videoTransformStyle({ isLocal: false, isScreenShare: false })).toBe('none');
+    expect(videoObjectFitStyle(true)).toBe('contain');
+    expect(videoObjectFitStyle(false)).toBe('cover');
   });
 });
 

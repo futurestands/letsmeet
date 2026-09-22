@@ -76,6 +76,8 @@ body {
   border: 0;
   border-radius: inherit;
   background: rgb(15 23 42);
+  position: relative;
+  overflow: hidden;
 }
 
 .lk-participant-tile video {
@@ -84,8 +86,19 @@ body {
   object-fit: cover;
 }
 
-.lk-participant-tile[data-lk-local-participant="true"] video {
+/* Mirror local camera video only, NEVER mirror screen share video */
+.lk-participant-tile[data-lk-local-participant="true"]:not([data-lk-source="screen_share"]):not([data-lk-source="screen_share_audio"]) video,
+.lk-participant-tile[data-lk-local-participant="true"][data-lk-source="camera"] video {
   transform: scaleX(-1);
+}
+
+/* Screen share tracks must NEVER be mirrored and must fit without cropping */
+.lk-participant-tile[data-lk-source="screen_share"] video,
+.lk-participant-tile[data-lk-source="screen_share_audio"] video,
+[data-screen-share-stage="true"] video,
+video[data-lk-source="screen_share"] {
+  transform: none !important;
+  object-fit: contain !important;
 }
 
 @media (max-width: 767px) {

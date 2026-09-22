@@ -138,19 +138,120 @@ const ParticipantGrid = memo(function ParticipantGrid({
     setPinnedIdentity((current) => (current === identity ? null : identity));
   };
 
+  if (screenShares.length > 0) {
+    const activePresenter = screenShares[0].participant;
+    const presenterName = activePresenter.name || activePresenter.identity || 'Participant';
+
+    return (
+      <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950" aria-label="Presentation stage">
+        {/* Main Screen Share Area (Full Stage) */}
+        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center bg-black p-2 sm:p-4" data-screen-share-stage="true">
+          <div className="relative h-full w-full max-w-7xl overflow-hidden rounded-2xl border border-blue-500/30 bg-black flex items-center justify-center">
+            <ParticipantTile trackRef={screenShares[0]} className="h-full w-full object-contain" data-lk-source="screen_share" />
+            <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-full bg-slate-950/80 px-3 py-1.5 text-xs font-semibold text-blue-200 backdrop-blur-md">
+              <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+              {presenterName} is presenting
+            </div>
+          </div>
+        </div>
+
+        {/* Non-colliding Horizontal Strip for Camera Tiles */}
+        {visibleTracks.length > 0 && (
+          <div className="flex shrink-0 items-center gap-2.5 overflow-x-auto border-t border-slate-800 bg-slate-950/90 p-2 sm:p-3 max-h-36 sm:max-h-44 scrollbar-thin">
+            {visibleTracks.map((trackRef) => {
+              const participant = trackRef.participant;
+              const identity = participant.identity;
+              const isHost = identity === hostId;
+              const handRaised = raisedHands.has(identity);
+              const speaking = isActiveSpeaker(identity, speakerIdentities);
+              const microphoneMuted = !participant.isMicrophoneEnabled;
+              const pinned = pinnedIdentity === identity;
+
+              return (
+                <div
+                  key={`strip-${identity}-${trackRef.source}`}
+                  className={`group relative h-24 w-36 sm:h-28 sm:w-44 shrink-0 overflow-hidden rounded-xl border bg-slate-900 ${
+                    pinned
+                      ? 'border-blue-400 shadow-[0_0_0_2px_rgba(96,165,250,0.25)]'
+                      : speaking
+                        ? 'border-emerald-400 shadow-[0_0_0_2px_rgba(52,211,153,0.2)]'
+                        : 'border-slate-800'
+                  }`}
+                  data-active-speaker={speaking ? 'true' : 'false'}
+                  data-pinned={pinned ? 'true' : 'false'}
+                  data-participant-identity={identity}
+                >
+                  <ParticipantTile trackRef={trackRef} className="h-full w-full" />
+                  <div className="pointer-events-none absolute left-1.5 top-1.5 flex flex-wrap gap-1">
+                    {isHost && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-400/90 px-1.5 py-0.5 text-[9px] font-bold text-slate-950">
+                        <Crown className="h-2.5 w-2.5" /> Host
+                      </span>
+                    )}
+                    {handRaised && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-500 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                        <Hand className="h-2.5 w-2.5" /> Raised
+                      </span>
+                    )}
+                    {speaking && (
+                      <span className="inline-flex items-center rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-slate-950">
+                        Speaking
+                      </span>
+                    )}
+                    {microphoneMuted && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-slate-950/85 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                        <MicOff className="h-2.5 w-2.5" /> Muted
+                      </span>
+                    )}
+                  </div>
+                  <div className="absolute bottom-1 right-1 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => togglePin(identity)}
+                      className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/85 text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      aria-label={pinned ? `Unpin ${participant.name || identity}` : `Pin ${participant.name || identity}`}
+                      aria-pressed={pinned}
+                      title={pinned ? 'Unpin participant' : 'Pin participant'}
+                    >
+                      {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    </button>
+                    {canModerate && !participant.isLocal && !isHost && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => onModerate(identity, 'mute')}
+                          className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-950/85 text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          aria-label={`Mute ${participant.name || identity}`}
+                          title="Mute participant"
+                        >
+                          <MicOff className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onModerate(identity, 'remove')}
+                          className="flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white focus:outline-none focus:ring-1 focus:ring-red-300"
+                          aria-label={`Remove ${participant.name || identity}`}
+                          title="Remove participant"
+                        >
+                          <UserMinus className="h-3 w-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  <div className="absolute bottom-1 left-1.5 max-w-[calc(100%-2.5rem)] truncate rounded bg-slate-950/70 px-1 py-0.5 text-[10px] text-white">
+                    {participant.name || identity}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-950" aria-label="Participant stage">
-      {screenShares.length > 0 && (
-        <div className="border-b border-slate-800 bg-black p-3" data-screen-share-stage="true">
-          <div className="mx-auto aspect-video max-h-[56vh] max-w-5xl overflow-hidden rounded-2xl border border-blue-400/40">
-            <ParticipantTile trackRef={screenShares[0]} className="h-full w-full" />
-          </div>
-          <p className="mt-2 text-center text-xs text-blue-200">
-            {screenShares[0].participant.name || 'Participant'} is presenting
-          </p>
-        </div>
-      )}
-
       <div className={`grid min-h-0 flex-1 auto-rows-fr gap-3 overflow-y-auto p-3 sm:p-4 ${gridColumns(visibleTracks.length)}`}>
         {visibleTracks.map((trackRef) => {
           const participant = trackRef.participant;
