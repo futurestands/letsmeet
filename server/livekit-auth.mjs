@@ -59,8 +59,14 @@ export function evaluateLiveKitAccess({
   }
 
   const participantStatus = String(participant.status ?? '').toLowerCase();
-  if (['left', 'removed'].includes(participantStatus) || !['joined', 'waiting', 'muted'].includes(participantStatus)) {
-    return { ok: false, status: 403, error: 'You do not have access to this meeting.' };
+  const participantRole = String(participant.role ?? 'participant').toLowerCase();
+
+  if (['left', 'removed'].includes(participantStatus)) {
+    return { ok: false, status: 403, error: 'You have been removed or have left this meeting.' };
+  }
+
+  if (!['joined', 'waiting', 'muted'].includes(participantStatus)) {
+    return { ok: false, status: 403, error: 'You do not have active access to this meeting.' };
   }
 
   void requestedIdentity;
@@ -69,13 +75,25 @@ export function evaluateLiveKitAccess({
   void requestedOrganizationId;
   void requestedWorkspaceId;
 
+  const isHost = meeting.host_id === userId || ['host', 'co-host'].includes(participantRole);
+
+  // Authoritative permissions based on status and role
+  // Admitted participants (joined/muted) can subscribe.
+  // Only joined participants (not waiting/muted) can publish.
+  const permissions = {
+    canPublish: participantStatus === 'joined',
+    canSubscribe: participantStatus === 'joined' || participantStatus === 'muted',
+    canPublishData: participantStatus === 'joined',
+  };
+
   return {
     ok: true,
     status: 200,
     identity: String(userId),
     name: String(userName || 'Meeting Participant'),
     room: meeting.code,
-    isHost: meeting.host_id === userId,
+    isHost,
+    permissions,
   };
 }
 
@@ -83,6 +101,7 @@ export function evaluateModerationAccess({
   isAuthenticated,
   actorId,
   meeting,
+  actorParticipant,
   targetParticipant,
   action,
 }) {
@@ -92,27 +111,58 @@ export function evaluateModerationAccess({
   if (!meeting) {
     return { ok: false, status: 404, error: 'Meeting not found.' };
   }
-  if (meeting.host_id !== actorId) {
-    return { ok: false, status: 403, error: 'Only the meeting host can moderate participants.' };
+
+  const actorRole = String(actorParticipant?.role ?? 'participant').toLowerCase();
+  const isAuthorizedActor = meeting.host_id === actorId || ['host', 'co-host', 'moderator'].includes(actorRole);
+
+  if (!isAuthorizedActor) {
+    return { ok: false, status: 403, error: 'Only authorized moderators can perform this action.' };
   }
+
   if (!['waiting', 'live'].includes(String(meeting.status))) {
     return { ok: false, status: 409, error: 'This meeting is not active.' };
   }
   if (!targetParticipant) {
     return { ok: false, status: 404, error: 'Participant not found.' };
   }
+
+  const targetRole = String(targetParticipant.role ?? 'participant').toLowerCase();
+
+  // Rules:
+  // 1. Host cannot be moderated.
+  // 2. Co-host/Moderator cannot moderate someone of equal or higher rank (Host > Co-Host > Moderator > Participant).
+  if (targetParticipant.user_id === meeting.host_id || targetRole === 'host') {
+    return { ok: false, status: 403, error: 'The primary host cannot be moderated.' };
+  }
+
+  if (actorId !== meeting.host_id) {
+     if (actorRole === 'moderator' && ['moderator', 'co-host'].includes(targetRole)) {
+        return { ok: false, status: 403, error: 'Moderators cannot moderate other moderators or co-hosts.' };
+     }
+     if (actorRole === 'co-host' && targetRole === 'co-host') {
+        // Option: allow co-hosts to moderate each other? Usually not.
+        return { ok: false, status: 403, error: 'Co-hosts cannot moderate other co-hosts.' };
+     }
+  }
+
   if (
-    targetParticipant.user_id === meeting.host_id
-    || targetParticipant.role === 'host'
-    || targetParticipant.organization_id !== meeting.organization_id
+    targetParticipant.organization_id !== meeting.organization_id
     || targetParticipant.workspace_id !== meeting.workspace_id
   ) {
-    return { ok: false, status: 403, error: 'Participant cannot be moderated.' };
+    return { ok: false, status: 403, error: 'Participant belongs to a different tenant.' };
   }
+
+  if (action === 'unmute') {
+    if (String(targetParticipant.status) !== 'muted') {
+      return { ok: false, status: 409, error: 'Participant is not currently muted.' };
+    }
+    return { ok: true, status: 200 };
+  }
+
   if (!['joined', 'waiting', 'muted'].includes(String(targetParticipant.status))) {
     return { ok: false, status: 409, error: 'Participant is no longer active.' };
   }
-  if (!['mute', 'remove'].includes(String(action))) {
+  if (!['mute', 'remove', 'admit'].includes(String(action))) {
     return { ok: false, status: 400, error: 'Unsupported moderation action.' };
   }
   return { ok: true, status: 200 };

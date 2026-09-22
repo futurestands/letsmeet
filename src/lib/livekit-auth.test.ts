@@ -123,6 +123,48 @@ describe('LiveKit authorization', () => {
     expect(member).toMatchObject({ ok: true, identity: 'user-b', isHost: false });
   });
 
+  it('restricts permissions for participants in the waiting room', () => {
+    const waiting = evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-waiting',
+      requestedRoom: meeting.code,
+      meeting,
+      participant: { ...memberParticipant, user_id: 'user-waiting', status: 'waiting' },
+      organizationMember: true,
+      workspaceMember: true,
+    });
+
+    expect(waiting).toMatchObject({
+      ok: true,
+      permissions: {
+        canPublish: false,
+        canSubscribe: false,
+        canPublishData: false,
+      },
+    });
+  });
+
+  it('allows subscription but blocks publishing for muted participants', () => {
+    const muted = evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-muted',
+      requestedRoom: meeting.code,
+      meeting,
+      participant: { ...memberParticipant, user_id: 'user-muted', status: 'muted' },
+      organizationMember: true,
+      workspaceMember: true,
+    });
+
+    expect(muted).toMatchObject({
+      ok: true,
+      permissions: {
+        canPublish: false,
+        canSubscribe: true,
+        canPublishData: false,
+      },
+    });
+  });
+
   it('allows invited guests with a participant row even without org membership', () => {
     expect(evaluateLiveKitAccess({
       isAuthenticated: true,
@@ -173,6 +215,68 @@ describe('LiveKit authorization', () => {
       workspaceMember: true,
     })).toMatchObject({ ok: false, status: 403 });
   });
+
+  it('rejects access to ended or cancelled meetings', () => {
+    expect(evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      requestedRoom: meeting.code,
+      meeting: { ...meeting, status: 'ended' },
+      participant: hostParticipant,
+      organizationMember: true,
+      workspaceMember: true,
+    })).toMatchObject({ ok: false, status: 403 });
+
+    expect(evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      requestedRoom: meeting.code,
+      meeting: { ...meeting, status: 'cancelled' },
+      participant: hostParticipant,
+      organizationMember: true,
+      workspaceMember: true,
+    })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('ensures host-muted participant remains blocked from publishing on token refresh and reconnect', () => {
+    const mutedParticipant = { ...memberParticipant, status: 'muted' };
+
+    const initialToken = evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-b',
+      requestedRoom: meeting.code,
+      meeting,
+      participant: mutedParticipant,
+      organizationMember: true,
+      workspaceMember: true,
+    });
+    expect(initialToken).toMatchObject({
+      ok: true,
+      permissions: {
+        canPublish: false,
+        canSubscribe: true,
+        canPublishData: false,
+      },
+    });
+
+    const reconnectedToken = evaluateLiveKitAccess({
+      isAuthenticated: true,
+      userId: 'user-b',
+      requestedRoom: meeting.code,
+      meeting,
+      participant: mutedParticipant,
+      organizationMember: true,
+      workspaceMember: true,
+    });
+    expect(reconnectedToken).toMatchObject({
+      ok: true,
+      permissions: {
+        canPublish: false,
+        canSubscribe: true,
+        canPublishData: false,
+      },
+    });
+  });
 });
 
 describe('LiveKit host moderation authorization', () => {
@@ -181,6 +285,7 @@ describe('LiveKit host moderation authorization', () => {
       isAuthenticated: true,
       actorId: 'user-a',
       meeting,
+      actorParticipant: hostParticipant,
       targetParticipant: memberParticipant,
       action: 'mute',
     })).toMatchObject({ ok: true, status: 200 });
@@ -188,9 +293,67 @@ describe('LiveKit host moderation authorization', () => {
       isAuthenticated: true,
       actorId: 'user-a',
       meeting,
+      actorParticipant: hostParticipant,
       targetParticipant: memberParticipant,
       action: 'remove',
     })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('allows the host to unmute a muted participant', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      actorParticipant: hostParticipant,
+      targetParticipant: { ...memberParticipant, status: 'muted' },
+      action: 'unmute',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('allows the host to admit a waiting participant', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      actorParticipant: hostParticipant,
+      targetParticipant: { ...memberParticipant, status: 'waiting' },
+      action: 'admit',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('allows a co-host to moderate a participant', () => {
+    const coHost = { ...memberParticipant, user_id: 'user-c', role: 'co-host' };
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-c',
+      meeting,
+      actorParticipant: coHost,
+      targetParticipant: memberParticipant,
+      action: 'mute',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('rejects a co-host moderating the host', () => {
+    const coHost = { ...memberParticipant, user_id: 'user-c', role: 'co-host' };
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-c',
+      meeting,
+      actorParticipant: coHost,
+      targetParticipant: hostParticipant,
+      action: 'mute',
+    })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('rejects unmute if participant is not muted', () => {
+    expect(evaluateModerationAccess({
+      isAuthenticated: true,
+      actorId: 'user-a',
+      meeting,
+      actorParticipant: hostParticipant,
+      targetParticipant: { ...memberParticipant, status: 'joined' },
+      action: 'unmute',
+    })).toMatchObject({ ok: false, status: 409 });
   });
 
   it('rejects non-host moderation and host targeting', () => {

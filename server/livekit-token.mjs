@@ -332,9 +332,9 @@ app.get('/api/livekit/token', async (req, res) => {
     at.addGrant({
       room: decision.room,
       roomJoin: true,
-      canPublish: true,
-      canSubscribe: true,
-      canPublishData: true,
+      canPublish: decision.permissions.canPublish,
+      canSubscribe: decision.permissions.canSubscribe,
+      canPublishData: decision.permissions.canPublishData,
     });
 
     const token = await at.toJwt();
@@ -419,10 +419,18 @@ app.post('/api/livekit/moderate', async (req, res) => {
       : { data: null, error: null };
     if (participantError) return res.status(500).json({ error: 'Unable to resolve the participant.' });
 
+    const { data: actorParticipant } = await supabaseAdmin
+      .from('meeting_participants')
+      .select('id, user_id, role, status')
+      .eq('meeting_id', meeting.id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
     const decision = evaluateModerationAccess({
       isAuthenticated: true,
       actorId: user.id,
       meeting,
+      actorParticipant,
       targetParticipant,
       action,
     });
@@ -434,7 +442,7 @@ app.post('/api/livekit/moderate', async (req, res) => {
     const { error: updateError } = await supabaseAdmin
       .from('meeting_participants')
       .update({
-        status: action === 'remove' ? 'removed' : 'muted',
+        status: action === 'remove' ? 'removed' : action === 'unmute' || action === 'admit' ? 'joined' : 'muted',
         left_at: action === 'remove' ? new Date().toISOString() : targetParticipant.left_at,
       })
       .eq('id', targetParticipant.id);
@@ -445,6 +453,15 @@ app.post('/api/livekit/moderate', async (req, res) => {
       const participantInfo = await roomService.getParticipant(room, targetIdentity);
       const microphoneTracks = participantInfo.tracks.filter((track) => track.source === TrackSource.MICROPHONE);
       await Promise.all(microphoneTracks.map((track) => roomService.mutePublishedTrack(room, targetIdentity, track.sid, true)));
+    } else if (action === 'unmute' || action === 'admit') {
+      // LiveKit server-side unmute just enables the ability to publish again if it was a permission restriction.
+      // If we just muted the track, we can't un-mute it server-side for most track types (security).
+      // However, since we use token permissions, the user needs to re-fetch the token OR we update their permissions in the room.
+      await roomService.updateParticipant(room, targetIdentity, undefined, {
+        canPublish: true,
+        canSubscribe: true,
+        canPublishData: true,
+      });
     } else {
       await roomService.removeParticipant(room, targetIdentity, {
         revokeTokenTs: BigInt(Math.floor(Date.now() / 1000)),
