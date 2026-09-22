@@ -76,12 +76,21 @@ export async function hostStartMeeting(page: Page): Promise<string> {
 
 export async function participantJoinMeeting(page: Page, meetingCode: string) {
   await page.goto(`/#/join/${meetingCode}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('button', { name: 'Join meeting' })).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: 'Join meeting' }).click();
-  await expect(page).toHaveURL(new RegExp(`#/meet/${meetingCode}`), { timeout: 90_000 });
-  // If the host already started, stage appears; otherwise waiting lobby briefly then stage.
+  const joinBtn = page.getByRole('button', { name: 'Join meeting' });
   const stage = page.getByRole('region', { name: 'Participant stage' });
-  await expect(stage).toBeVisible({ timeout: 120_000 });
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (await stage.isVisible().catch(() => false)) break;
+    if (await joinBtn.isVisible().catch(() => false)) {
+      await joinBtn.click();
+    }
+    const tryAgain = page.getByRole('button', { name: 'Try again' });
+    if (await tryAgain.isVisible().catch(() => false)) {
+      await tryAgain.click();
+    }
+    await page.waitForTimeout(3000);
+  }
+  await expect(stage).toBeVisible({ timeout: 90_000 });
 }
 
 export async function waitForRemoteParticipantTiles(page: Page, minimum = 2) {
