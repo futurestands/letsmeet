@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
 
 const meeting = {
   id: 'meeting-a',
@@ -398,5 +398,88 @@ describe('LiveKit host moderation authorization', () => {
       targetParticipant: { ...memberParticipant, status: 'removed' },
       action: 'remove',
     })).toMatchObject({ ok: false, status: 409 });
+  });
+});
+
+describe('LiveKit recording authorization', () => {
+  const recording = {
+    id: 'rec-1',
+    meeting_id: 'meeting-a',
+    organization_id: 'org-a',
+    workspace_id: 'workspace-a',
+    started_by: 'user-a',
+    status: 'queued',
+  };
+
+  it('rejects unauthenticated recording management', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: false,
+      userId: null,
+      meeting,
+      recording,
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it('rejects recording management by ordinary participants', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-b',
+      meeting,
+      recording,
+      actorRole: 'participant',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('allows meeting host or org admin to start recording for a live meeting', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording,
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('rejects starting recording when meeting is not live', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting: { ...meeting, status: 'waiting' },
+      recording,
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it('rejects starting recording if recording is already active', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, status: 'active' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it('rejects recording associated with a different meeting', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, meeting_id: 'meeting-other' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'start',
+    })).toMatchObject({ ok: false, status: 403 });
   });
 });

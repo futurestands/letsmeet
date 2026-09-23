@@ -167,3 +167,57 @@ export function evaluateModerationAccess({
   }
   return { ok: true, status: 200 };
 }
+
+export function evaluateRecordingAccess({
+  isAuthenticated,
+  userId,
+  meeting,
+  recording,
+  actorRole,
+  isOrgAdmin,
+  action,
+}) {
+  if (!isAuthenticated || !userId) {
+    return { ok: false, status: 401, error: 'Authentication is required.' };
+  }
+  if (!meeting) {
+    return { ok: false, status: 404, error: 'Meeting not found.' };
+  }
+  if (!recording) {
+    return { ok: false, status: 404, error: 'Recording not found.' };
+  }
+
+  if (recording.meeting_id !== meeting.id) {
+    return { ok: false, status: 403, error: 'Recording does not belong to this meeting.' };
+  }
+
+  const role = String(actorRole ?? 'participant').toLowerCase();
+  const canManage = meeting.host_id === userId || ['host', 'co-host'].includes(role) || Boolean(isOrgAdmin);
+
+  if (!canManage) {
+    return { ok: false, status: 403, error: 'Unauthorized to manage recordings for this meeting.' };
+  }
+
+  if (action === 'start') {
+    if (meeting.status !== 'live') {
+      return { ok: false, status: 400, error: 'Meeting must be live to start recording.' };
+    }
+    if (!['queued', 'failed'].includes(recording.status)) {
+      return { ok: false, status: 409, error: `Recording is already in ${recording.status} state.` };
+    }
+  }
+
+  if (action === 'stop') {
+    if (recording.status === 'completed') {
+      return { ok: true, status: 200, alreadyCompleted: true };
+    }
+    if (!['starting', 'active'].includes(recording.status)) {
+      if (recording.status === 'queued') {
+        return { ok: true, status: 200, canCancel: true };
+      }
+      return { ok: false, status: 409, error: `Recording is in ${recording.status} state and cannot be stopped.` };
+    }
+  }
+
+  return { ok: true, status: 200 };
+}
