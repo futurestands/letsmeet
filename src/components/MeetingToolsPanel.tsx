@@ -142,6 +142,26 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
     }
   };
 
+  const stopRecording = async (recordingId: string) => {
+    setError(null);
+    try {
+      await requestStopRecording(recordingId);
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (accessToken) {
+        const stopUrl = tokenEndpoint.replace(/\/livekit\/token(?:\?.*)?$/, '/recordings/stop');
+        await fetch(stopUrl, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recordingId }),
+        }).catch(() => undefined);
+      }
+      await reload();
+    } catch (stopError) {
+      setError(stopError instanceof Error ? stopError.message : 'Recording could not be stopped.');
+    }
+  };
+
   const visibleQuestions = questions.filter((question) => qaFilter === 'all' || question.status === qaFilter);
 
   return (
@@ -329,7 +349,7 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void startRecording()} className="rounded-lg bg-red-600 px-3 py-2 text-white" aria-label="Start recording">Start recording</button>
                 {recordings[0] && ['queued', 'starting', 'active'].includes(recordings[0].status) && (
-                  <button onClick={() => void requestStopRecording(recordings[0].id).then(() => reload())} className="rounded-lg border border-slate-600 px-3 py-2">Stop</button>
+                  <button type="button" onClick={() => void stopRecording(recordings[0].id)} className="rounded-lg border border-slate-600 px-3 py-2">Stop</button>
                 )}
               </div>
             )}

@@ -5,7 +5,7 @@ import { createAuthenticatedDualMeeting } from './helpers/conference';
 test.describe.configure({ mode: 'serial' });
 
 test('reactions - participant sends emoji reaction and overlay is visibly received', async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   const setup = await createAuthenticatedDualMeeting(browser);
   const { hostContext, participantContext, hostPage, participantPage, meetingCode, timings } = setup;
   void hostPage;

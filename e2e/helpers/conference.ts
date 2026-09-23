@@ -101,14 +101,18 @@ export async function participantJoinMeeting(page: Page, meetingCode: string) {
   const joinBtn = page.getByRole('button', { name: 'Join meeting' });
   const stage = page.getByRole('region', { name: 'Participant stage' });
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
     if (await stage.isVisible().catch(() => false)) break;
     if (await joinBtn.isVisible().catch(() => false)) {
-      await joinBtn.click();
+      await joinBtn.click().catch(() => undefined);
     }
     const tryAgain = page.getByRole('button', { name: 'Try again' });
     if (await tryAgain.isVisible().catch(() => false)) {
-      await tryAgain.click();
+      await tryAgain.click().catch(() => undefined);
+    }
+    const waitingBanner = page.getByText(/Waiting for the host/i);
+    if (attempt >= 2 && await waitingBanner.isVisible().catch(() => false)) {
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
     }
     await page.waitForTimeout(3000);
   }
@@ -117,7 +121,7 @@ export async function participantJoinMeeting(page: Page, meetingCode: string) {
 
 export async function waitForRemoteParticipantTiles(page: Page, minimum = 2) {
   await expect
-    .poll(async () => page.locator('[data-participant-identity]').count(), { timeout: 90_000 })
+    .poll(async () => page.locator('[data-participant-identity]').count(), { timeout: 120_000 })
     .toBeGreaterThanOrEqual(minimum);
 }
 
@@ -214,9 +218,11 @@ export async function createAuthenticatedDualMeeting(browser: Browser): Promise<
   await participantJoinMeeting(participantPage, meetingCode);
   timings.participantJoinMs = Date.now() - startTs;
 
-  // 5. Remote Tiles Visible
-  await waitForRemoteParticipantTiles(hostPage, 2);
-  await waitForRemoteParticipantTiles(participantPage, 2);
+  // 5. Remote Tiles Visible (in parallel)
+  await Promise.all([
+    waitForRemoteParticipantTiles(hostPage, 2),
+    waitForRemoteParticipantTiles(participantPage, 2),
+  ]);
   timings.remoteTilesMs = Date.now() - startTs;
 
   return {

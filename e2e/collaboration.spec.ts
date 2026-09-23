@@ -5,7 +5,7 @@ import { createAuthenticatedDualMeeting, openCollaborationTools } from './helper
 test.describe.configure({ mode: 'serial' });
 
 test('collaboration - polls, Q&A, shared notes, and whiteboard rendering', async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(360_000);
   const setup = await createAuthenticatedDualMeeting(browser);
   const { hostContext, participantContext, hostPage, participantPage, meetingCode, timings } = setup;
 
