@@ -622,18 +622,183 @@ app.post('/api/recordings/stop', async (req, res) => {
     try {
       await egress.stopEgress(recording.egress_id);
 
-      // We don't mark as COMPLETED here yet because we should wait for LiveKit webhook
-      // or a background processor to confirm the file is in storage.
-      // But for now, we mark it as processing/stopping.
       return res.json({ ok: true, recordingId, status: RECORDING_STATUS.STOPPING });
     } catch (lkError) {
       console.error('LiveKit egress stop failed', lkError);
-      // Revert to active if stop failed, or mark as failed if it's a permanent error
       return res.status(502).json({ error: 'LiveKit egress could not be stopped.' });
     }
   } catch (error) {
     console.error('Internal recording stop error', error);
     return res.status(500).json({ error: 'Internal server error while stopping recording.' });
+  }
+});
+
+app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json', 'application/json'] }), async (req, res) => {
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+  if (!apiKey || !apiSecret || !supabaseAdmin) {
+    return res.status(503).json({ error: 'Webhook processing unavailable.' });
+  }
+
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authorization header is required.' });
+  }
+
+  try {
+    const { WebhookReceiver, EgressStatus } = await import('livekit-server-sdk');
+    const receiver = new WebhookReceiver(apiKey, apiSecret);
+
+    const rawBody = typeof req.body === 'string'
+      ? req.body
+      : Buffer.isBuffer(req.body)
+        ? req.body.toString('utf-8')
+        : JSON.stringify(req.body);
+
+    const event = await receiver.receive(rawBody, authHeader);
+    const egressInfo = event?.egressInfo || event?.egress_info;
+    if (!egressInfo) {
+      return res.json({ ok: true, ignored: true });
+    }
+
+    const egressId = egressInfo.egressId || egressInfo.egress_id;
+    if (!egressId) {
+      return res.json({ ok: true, ignored: true });
+    }
+
+    const { data: recording } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, meeting_id, organization_id, workspace_id, status, storage_key')
+      .eq('egress_id', egressId)
+      .maybeSingle();
+
+    if (!recording) {
+      return res.json({ ok: true, unmapped: true });
+    }
+
+    const egressStatus = egressInfo.status;
+    const isComplete = egressStatus === EgressStatus.EGRESS_COMPLETE || egressStatus === 3 || String(egressStatus).toUpperCase() === 'EGRESS_COMPLETE';
+    const isFailed = egressStatus === EgressStatus.EGRESS_FAILED || egressStatus === EgressStatus.EGRESS_ABORTED || egressStatus === 4 || egressStatus === 5;
+
+    if (isComplete) {
+      const fileResult = egressInfo.fileResults?.[0] || egressInfo.file_results?.[0];
+      const storageKey = fileResult?.filename || recording.storage_key;
+      const location = fileResult?.location || fileResult?.downloadUrl || fileResult?.download_url;
+      const playbackUrl = location
+        || (process.env.RECORDING_PLAYBACK_BASE_URL && storageKey
+            ? `${process.env.RECORDING_PLAYBACK_BASE_URL.replace(/\/$/, '')}/${storageKey}`
+            : null);
+
+      await supabaseAdmin.from('meeting_recordings').update({
+        status: RECORDING_STATUS.COMPLETED,
+        storage_key: storageKey,
+        playback_url: playbackUrl,
+        ended_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', recording.id);
+
+      tokenMetrics.recordRecordingCompleted();
+      return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.COMPLETED });
+    }
+
+    if (isFailed) {
+      const errorMsg = egressInfo.error || 'LiveKit egress reported failure.';
+      await supabaseAdmin.from('meeting_recordings').update({
+        status: RECORDING_STATUS.FAILED,
+        error: errorMsg,
+        ended_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', recording.id);
+
+      tokenMetrics.recordRecordingFailed();
+      return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.FAILED });
+    }
+
+    return res.json({ ok: true, recordingId: recording.id, status: recording.status });
+  } catch (err) {
+    console.error('LiveKit webhook verification error', err);
+    return res.status(401).json({ error: 'Invalid webhook signature or payload.' });
+  }
+});
+
+app.post('/api/recordings/reconcile', async (req, res) => {
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const cutoffIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const { data: pendingRecordings } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, meeting_id, egress_id, status, storage_key')
+      .in('status', [RECORDING_STATUS.STARTING, RECORDING_STATUS.ACTIVE, RECORDING_STATUS.STOPPING])
+      .lte('updated_at', cutoffIso)
+      .limit(20);
+
+    if (!pendingRecordings?.length) {
+      return res.json({ ok: true, reconciledCount: 0 });
+    }
+
+    if (!process.env.LIVEKIT_HOST || !process.env.LIVEKIT_API_KEY || !process.env.LIVEKIT_API_SECRET) {
+      return res.status(503).json({ error: 'LiveKit egress server credentials are not configured.' });
+    }
+
+    const { EgressClient, EgressStatus } = await import('livekit-server-sdk');
+    const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
+
+    let reconciledCount = 0;
+    for (const rec of pendingRecordings) {
+      if (!rec.egress_id) continue;
+      try {
+        const infoList = await egress.listEgress({ egressId: rec.egress_id });
+        const info = infoList[0];
+        if (!info) continue;
+
+        if (info.status === EgressStatus.EGRESS_COMPLETE || info.status === 3) {
+          const fileResult = info.fileResults?.[0];
+          const storageKey = fileResult?.filename || rec.storage_key;
+          const location = fileResult?.location || fileResult?.downloadUrl;
+          const playbackUrl = location
+            || (process.env.RECORDING_PLAYBACK_BASE_URL && storageKey
+                ? `${process.env.RECORDING_PLAYBACK_BASE_URL.replace(/\/$/, '')}/${storageKey}`
+                : null);
+
+          await supabaseAdmin.from('meeting_recordings').update({
+            status: RECORDING_STATUS.COMPLETED,
+            storage_key: storageKey,
+            playback_url: playbackUrl,
+            ended_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', rec.id);
+          reconciledCount += 1;
+        } else if (info.status === EgressStatus.EGRESS_FAILED || info.status === EgressStatus.EGRESS_ABORTED) {
+          await supabaseAdmin.from('meeting_recordings').update({
+            status: RECORDING_STATUS.FAILED,
+            error: info.error || 'Egress failed during reconciliation.',
+            ended_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('id', rec.id);
+          reconciledCount += 1;
+        }
+      } catch (e) {
+        if (rec.status === RECORDING_STATUS.STOPPING) {
+          await supabaseAdmin.from('meeting_recordings').update({
+            status: RECORDING_STATUS.FAILED,
+            error: 'Egress session expired or not found on LiveKit server.',
+            updated_at: new Date().toISOString(),
+          }).eq('id', rec.id);
+          reconciledCount += 1;
+        }
+      }
+    }
+
+    return res.json({ ok: true, reconciledCount });
+  } catch (error) {
+    console.error('Reconciliation error', error);
+    return res.status(500).json({ error: 'Reconciliation failed.' });
   }
 });
 

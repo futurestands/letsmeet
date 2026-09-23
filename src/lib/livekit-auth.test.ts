@@ -482,4 +482,38 @@ describe('LiveKit recording authorization', () => {
       action: 'start',
     })).toMatchObject({ ok: false, status: 403 });
   });
+
+  it('allows stopping an active or starting recording', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, status: 'active' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'stop',
+    })).toMatchObject({ ok: true, status: 200 });
+
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, status: 'queued' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'stop',
+    })).toMatchObject({ ok: true, status: 200, canCancel: true });
+  });
+
+  it('handles duplicate stop on an already completed recording', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, status: 'completed' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'stop',
+    })).toMatchObject({ ok: true, status: 200, alreadyCompleted: true });
+  });
 });

@@ -15,7 +15,6 @@ import {
   moderateMeetingQuestion,
   requestMeetingAiJob,
   requestMeetingRecording,
-  requestStopRecording,
   saveMeetingNotes,
   upvoteMeetingQuestion,
   voteMeetingPoll,
@@ -145,16 +144,20 @@ export default function MeetingToolsPanel({ meetingId, isHost, tokenEndpoint }: 
   const stopRecording = async (recordingId: string) => {
     setError(null);
     try {
-      await requestStopRecording(recordingId);
       const { data } = await supabase.auth.getSession();
       const accessToken = data.session?.access_token;
-      if (accessToken) {
-        const stopUrl = tokenEndpoint.replace(/\/livekit\/token(?:\?.*)?$/, '/recordings/stop');
-        await fetch(stopUrl, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recordingId }),
-        }).catch(() => undefined);
+      if (!accessToken) throw new Error('Session expired');
+
+      const stopUrl = tokenEndpoint.replace(/\/livekit\/token(?:\?.*)?$/, '/recordings/stop');
+      const response = await fetch(stopUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingId }),
+      });
+
+      const payload = await response.json() as { error?: string; status?: string };
+      if (!response.ok) {
+        setError(payload.error || 'Recording could not be stopped.');
       }
       await reload();
     } catch (stopError) {
