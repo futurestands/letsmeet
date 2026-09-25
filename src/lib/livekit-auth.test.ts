@@ -538,3 +538,31 @@ describe('Recording state machine transitions', () => {
     expect(isValidRecordingTransition('completed', 'failed')).toBe(false);
   });
 });
+
+describe('Webhook ordering and terminal state monotonicity', () => {
+  it('Scenario A: normal lifecycle STARTING -> ACTIVE -> STOPPING -> COMPLETED -> COMPLETED', () => {
+    expect(isValidRecordingTransition('starting', 'active')).toBe(true);
+    expect(isValidRecordingTransition('active', 'stopping')).toBe(true);
+    expect(isValidRecordingTransition('stopping', 'completed')).toBe(true);
+    expect(isValidRecordingTransition('completed', 'completed')).toBe(true);
+  });
+
+  it('Scenario B: failure lifecycle STARTING -> ACTIVE -> STOPPING -> FAILED -> FAILED', () => {
+    expect(isValidRecordingTransition('starting', 'active')).toBe(true);
+    expect(isValidRecordingTransition('active', 'stopping')).toBe(true);
+    expect(isValidRecordingTransition('stopping', 'failed')).toBe(true);
+    expect(isValidRecordingTransition('failed', 'failed')).toBe(true);
+  });
+
+  it('Scenario C & E: late EGRESS_FAILED after COMPLETED is rejected', () => {
+    expect(isValidRecordingTransition('completed', 'failed')).toBe(false);
+  });
+
+  it('Scenario D: late EGRESS_COMPLETE after FAILED without retry is rejected', () => {
+    expect(isValidRecordingTransition('failed', 'completed')).toBe(false);
+  });
+
+  it('Scenario F: late EGRESS_COMPLETE after CANCELLED is rejected', () => {
+    expect(isValidRecordingTransition('cancelled', 'completed')).toBe(false);
+  });
+});
