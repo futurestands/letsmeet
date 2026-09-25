@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
 import pLimit from 'p-limit';
-import { evaluateLiveKitAccess, evaluateModerationAccess, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, isValidRecordingTransition, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
 import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload } from './recordings.mjs';
 import { aiStatusPayload, executeAiJob } from './ai.mjs';
@@ -499,8 +499,24 @@ app.post('/api/recordings/start', async (req, res) => {
     const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id });
     if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings for this meeting.' });
 
-    if (!['queued', 'failed'].includes(recording.status)) {
-      return res.status(409).json({ error: `Recording is already in ${recording.status} state.`, status: recording.status });
+    if (!isValidRecordingTransition(recording.status, RECORDING_STATUS.STARTING)) {
+      return res.status(409).json({ error: `Illegal transition from ${recording.status} to starting.`, status: recording.status });
+    }
+
+    // Single Active Recording Invariant: ensure no other recording is currently active/starting for this meeting
+    const { data: activeRecordings } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, status')
+      .eq('meeting_id', recording.meeting_id)
+      .in('status', [RECORDING_STATUS.STARTING, RECORDING_STATUS.ACTIVE])
+      .neq('id', recording.id);
+
+    if (activeRecordings?.length) {
+      return res.status(409).json({
+        error: 'Another recording is already active for this meeting.',
+        activeRecordingId: activeRecordings[0].id,
+        status: activeRecordings[0].status,
+      });
     }
 
     const { data: meeting } = await supabaseAdmin
@@ -625,7 +641,13 @@ app.post('/api/recordings/stop', async (req, res) => {
       return res.json({ ok: true, recordingId, status: RECORDING_STATUS.STOPPING });
     } catch (lkError) {
       console.error('LiveKit egress stop failed', lkError);
-      return res.status(502).json({ error: 'LiveKit egress could not be stopped.' });
+      await supabaseAdmin.from('meeting_recordings').update({
+        status: RECORDING_STATUS.ACTIVE,
+        error: `Stop failed: ${lkError?.message || lkError}`,
+        updated_at: new Date().toISOString(),
+      }).eq('id', recording.id);
+
+      return res.status(502).json({ error: 'LiveKit egress could not be stopped. Recording remains active.' });
     }
   } catch (error) {
     console.error('Internal recording stop error', error);
@@ -674,6 +696,11 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
 
     if (!recording) {
       return res.json({ ok: true, unmapped: true });
+    }
+
+    // Terminal State Monotonicity: COMPLETED or CANCELLED recordings cannot be overwritten by out-of-order egress events
+    if ([RECORDING_STATUS.COMPLETED, RECORDING_STATUS.CANCELLED].includes(recording.status)) {
+      return res.json({ ok: true, recordingId: recording.id, status: recording.status, idempotent: true });
     }
 
     const egressStatus = egressInfo.status;
@@ -729,6 +756,17 @@ app.post('/api/recordings/reconcile', async (req, res) => {
   try {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
     if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const meetingId = req.body?.meetingId;
+    if (meetingId) {
+      const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId });
+      if (!canManage) return res.status(403).json({ error: 'Unauthorized to reconcile recordings for this meeting.' });
+    } else {
+      const { data: isAppAdmin } = await supabaseAdmin.rpc('is_app_admin', { p_user_id: user.id }).catch(() => ({ data: false }));
+      if (!isAppAdmin) {
+        return res.status(403).json({ error: 'System reconciliation requires administrative privileges.' });
+      }
+    }
 
     const cutoffIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const { data: pendingRecordings } = await supabaseAdmin

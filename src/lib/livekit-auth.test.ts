@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isValidRecordingTransition, isAllowedRoomCode } from '../../server/livekit-auth.mjs';
 
 const meeting = {
   id: 'meeting-a',
@@ -515,5 +515,26 @@ describe('LiveKit recording authorization', () => {
       isOrgAdmin: false,
       action: 'stop',
     })).toMatchObject({ ok: true, status: 200, alreadyCompleted: true });
+  });
+});
+
+describe('Recording state machine transitions', () => {
+  it('permits legal transitions', () => {
+    expect(isValidRecordingTransition('queued', 'starting')).toBe(true);
+    expect(isValidRecordingTransition('starting', 'active')).toBe(true);
+    expect(isValidRecordingTransition('active', 'stopping')).toBe(true);
+    expect(isValidRecordingTransition('stopping', 'completed')).toBe(true);
+    expect(isValidRecordingTransition('stopping', 'failed')).toBe(true);
+    expect(isValidRecordingTransition('stopping', 'active')).toBe(true);
+    expect(isValidRecordingTransition('queued', 'cancelled')).toBe(true);
+    expect(isValidRecordingTransition('failed', 'queued')).toBe(true);
+  });
+
+  it('rejects illegal transitions', () => {
+    expect(isValidRecordingTransition('completed', 'active')).toBe(false);
+    expect(isValidRecordingTransition('completed', 'starting')).toBe(false);
+    expect(isValidRecordingTransition('cancelled', 'active')).toBe(false);
+    expect(isValidRecordingTransition('failed', 'stopping')).toBe(false);
+    expect(isValidRecordingTransition('completed', 'failed')).toBe(false);
   });
 });

@@ -168,6 +168,25 @@ export function evaluateModerationAccess({
   return { ok: true, status: 200 };
 }
 
+const VALID_RECORDING_TRANSITIONS = {
+  queued: ['starting', 'cancelled', 'failed'],
+  starting: ['active', 'failed', 'cancelled'],
+  active: ['stopping', 'failed'],
+  stopping: ['completed', 'failed', 'active'],
+  completed: [],
+  failed: ['queued', 'starting'],
+  cancelled: [],
+};
+
+export function isValidRecordingTransition(currentStatus, nextStatus) {
+  const from = String(currentStatus ?? 'queued').toLowerCase();
+  const to = String(nextStatus ?? '').toLowerCase();
+
+  if (from === to) return true;
+  const allowed = VALID_RECORDING_TRANSITIONS[from] || [];
+  return allowed.includes(to);
+}
+
 export function evaluateRecordingAccess({
   isAuthenticated,
   userId,
@@ -202,8 +221,8 @@ export function evaluateRecordingAccess({
     if (meeting.status !== 'live') {
       return { ok: false, status: 400, error: 'Meeting must be live to start recording.' };
     }
-    if (!['queued', 'failed'].includes(recording.status)) {
-      return { ok: false, status: 409, error: `Recording is already in ${recording.status} state.` };
+    if (!isValidRecordingTransition(recording.status, 'starting')) {
+      return { ok: false, status: 409, error: `Recording cannot transition from ${recording.status} to starting.` };
     }
   }
 
