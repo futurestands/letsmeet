@@ -552,10 +552,15 @@ app.post('/api/recordings/start', async (req, res) => {
     const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
 
     // Update status to starting before calling LiveKit to prevent races
-    await supabaseAdmin.from('meeting_recordings').update({
+    const { error: startingErr } = await supabaseAdmin.from('meeting_recordings').update({
       status: RECORDING_STATUS.STARTING,
       updated_at: new Date().toISOString(),
     }).eq('id', recording.id);
+
+    if (startingErr) {
+      console.error('Failed to transition recording to starting:', startingErr);
+      return res.status(409).json({ error: `State transition to starting rejected: ${startingErr.message}` });
+    }
 
     try {
       const info = await egress.startRoomCompositeEgress(meeting.code, {
@@ -570,13 +575,19 @@ app.post('/api/recordings/start', async (req, res) => {
         },
       });
 
-      await supabaseAdmin.from('meeting_recordings').update({
+      const { error: activeErr } = await supabaseAdmin.from('meeting_recordings').update({
         status: RECORDING_STATUS.ACTIVE,
         egress_id: String(info?.egressId ?? info?.egress_id ?? ''),
         storage_provider: storage.provider,
         storage_key: storage.objectKeyFor(recording),
         started_at: new Date().toISOString(),
       }).eq('id', recording.id);
+
+      if (activeErr) {
+        console.error('Failed to transition recording to active:', activeErr);
+        await egress.stopEgress(String(info?.egressId ?? info?.egress_id ?? '')).catch(() => undefined);
+        return res.status(500).json({ error: `Failed to persist active recording state: ${activeErr.message}` });
+      }
 
       tokenMetrics.recordRecordingStarted();
       return res.json({ ok: true, recordingId, status: RECORDING_STATUS.ACTIVE });
@@ -636,10 +647,15 @@ app.post('/api/recordings/stop', async (req, res) => {
     const { EgressClient } = await import('livekit-server-sdk');
     const egress = new EgressClient(process.env.LIVEKIT_HOST, process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET);
 
-    await supabaseAdmin.from('meeting_recordings').update({
+    const { error: stoppingErr } = await supabaseAdmin.from('meeting_recordings').update({
       status: RECORDING_STATUS.STOPPING,
       updated_at: new Date().toISOString(),
     }).eq('id', recording.id);
+
+    if (stoppingErr) {
+      console.error('Failed to transition recording to stopping:', stoppingErr);
+      return res.status(409).json({ error: `State transition to stopping rejected: ${stoppingErr.message}` });
+    }
 
     try {
       await egress.stopEgress(recording.egress_id);

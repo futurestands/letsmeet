@@ -566,3 +566,50 @@ describe('Webhook ordering and terminal state monotonicity', () => {
     expect(isValidRecordingTransition('cancelled', 'completed')).toBe(false);
   });
 });
+
+describe('Recording playback security authorization', () => {
+  const recording = {
+    id: 'rec-1',
+    meeting_id: 'meeting-a',
+    organization_id: 'org-a',
+    workspace_id: 'workspace-a',
+    started_by: 'user-a',
+    status: 'completed',
+  };
+
+  it('allows host or org admin to access completed recording playback', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording,
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'playback',
+    })).toMatchObject({ ok: true, status: 200 });
+  });
+
+  it('rejects playback access for unauthenticated callers', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: false,
+      userId: null,
+      meeting,
+      recording,
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'playback',
+    })).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it('rejects playback access for recording belonging to another meeting', () => {
+    expect(evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: 'user-a',
+      meeting,
+      recording: { ...recording, meeting_id: 'meeting-cross-tenant' },
+      actorRole: 'host',
+      isOrgAdmin: false,
+      action: 'playback',
+    })).toMatchObject({ ok: false, status: 403 });
+  });
+});
