@@ -1,8 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
+import dotenv from 'dotenv';
 
-const connectionString = 'postgresql://postgres.uasslvisjnwhdhcgqwyc:QWr%3AB%3AVW6k7VyEf@aws-0-eu-west-2.pooler.supabase.com:6543/postgres';
+dotenv.config({ path: '.env.staging.local' });
+dotenv.config({ path: '.env.local' });
+
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  console.error('DATABASE_URL environment variable is required.');
+  process.exit(1);
+}
 
 async function applyMigration() {
   console.log('=== APPLYING MIGRATION 022 TO STAGING DATABASE ===\n');
@@ -13,7 +22,7 @@ async function applyMigration() {
   });
 
   await client.connect();
-  console.log('Connected to staging PostgreSQL database (eu-west-2)...');
+  console.log('Connected to staging PostgreSQL database...');
 
   const migrationPath = path.join(process.cwd(), 'supabase', 'migrations', '022_recording_state_machine_enforcement.sql');
   const sql = fs.readFileSync(migrationPath, 'utf-8');

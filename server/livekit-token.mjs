@@ -5,9 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
 import pLimit from 'p-limit';
-import { evaluateLiveKitAccess, evaluateModerationAccess, isValidRecordingTransition, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
+import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isValidRecordingTransition, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
-import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload } from './recordings.mjs';
+import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, verifyStorageObjectExists } from './recordings.mjs';
 import { aiStatusPayload, executeAiJob } from './ai.mjs';
 import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
@@ -496,11 +496,27 @@ app.post('/api/recordings/start', async (req, res) => {
     if (!recording) return res.status(404).json({ error: 'Recording not found.' });
 
     // Multi-tenant authorization: Check if user is host or admin
-    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id });
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
     if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings for this meeting.' });
 
-    if (!isValidRecordingTransition(recording.status, RECORDING_STATUS.STARTING)) {
-      return res.status(409).json({ error: `Illegal transition from ${recording.status} to starting.`, status: recording.status });
+    const { data: meeting } = await supabaseAdmin
+      .from('meetings')
+      .select('id, code, host_id, status, organization_id, workspace_id')
+      .eq('id', recording.meeting_id)
+      .maybeSingle();
+
+    const accessDecision = evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: user.id,
+      meeting,
+      recording,
+      actorRole: meeting?.host_id === user.id ? 'host' : 'participant',
+      isOrgAdmin: Boolean(canManage),
+      action: 'start',
+    });
+
+    if (!accessDecision.ok) {
+      return res.status(accessDecision.status).json({ error: accessDecision.error });
     }
 
     // Single Active Recording Invariant: ensure no other recording is currently active/starting for this meeting
@@ -517,16 +533,6 @@ app.post('/api/recordings/start', async (req, res) => {
         activeRecordingId: activeRecordings[0].id,
         status: activeRecordings[0].status,
       });
-    }
-
-    const { data: meeting } = await supabaseAdmin
-      .from('meetings')
-      .select('id, code, host_id, status')
-      .eq('id', recording.meeting_id)
-      .maybeSingle();
-
-    if (!meeting || meeting.status !== 'live') {
-      return res.status(400).json({ error: 'Meeting must be live to start recording.' });
     }
 
     const dispatch = describeRecordingDispatch(recording);
@@ -608,7 +614,7 @@ app.post('/api/recordings/stop', async (req, res) => {
 
     if (recordingError || !recording) return res.status(404).json({ error: 'Recording not found.' });
 
-    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id });
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
     if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings.' });
 
     if (recording.status === RECORDING_STATUS.COMPLETED) {
@@ -711,6 +717,25 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
       const fileResult = egressInfo.fileResults?.[0] || egressInfo.file_results?.[0];
       const storageKey = fileResult?.filename || recording.storage_key;
       const location = fileResult?.location || fileResult?.downloadUrl || fileResult?.download_url;
+
+      const storage = createRecordingStorageAdapter();
+      let objectVerified = true;
+      if (storage) {
+        objectVerified = await verifyStorageObjectExists(storage, storageKey);
+      }
+
+      if (!objectVerified && storage) {
+        await supabaseAdmin.from('meeting_recordings').update({
+          status: RECORDING_STATUS.FAILED,
+          error: 'Egress completed but output file could not be verified in storage.',
+          ended_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', recording.id);
+
+        tokenMetrics.recordRecordingFailed();
+        return res.status(502).json({ error: 'Storage object verification failed.', recordingId: recording.id });
+      }
+
       const playbackUrl = location
         || (process.env.RECORDING_PLAYBACK_BASE_URL && storageKey
             ? `${process.env.RECORDING_PLAYBACK_BASE_URL.replace(/\/$/, '')}/${storageKey}`
@@ -759,11 +784,16 @@ app.post('/api/recordings/reconcile', async (req, res) => {
 
     const meetingId = req.body?.meetingId;
     if (meetingId) {
-      const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId });
+      const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId, p_user_id: user.id });
       if (!canManage) return res.status(403).json({ error: 'Unauthorized to reconcile recordings for this meeting.' });
     } else {
-      const { data: isAppAdmin } = await supabaseAdmin.rpc('is_app_admin', { p_user_id: user.id }).catch(() => ({ data: false }));
-      if (!isAppAdmin) {
+      const { data: userOrgs } = await supabaseAdmin
+        .from('organization_memberships')
+        .select('organization_id, role')
+        .eq('user_id', user.id)
+        .in('role', ['owner', 'admin']);
+
+      if (!userOrgs?.length) {
         return res.status(403).json({ error: 'System reconciliation requires administrative privileges.' });
       }
     }

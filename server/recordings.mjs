@@ -63,6 +63,29 @@ export function createRecordingStorageAdapter() {
   };
 }
 
+export async function verifyStorageObjectExists(adapter, storageKey) {
+  if (!adapter || !storageKey) return false;
+  if (!recordingStorageConfigured()) return false;
+  try {
+    const { S3Client, HeadObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3 = new S3Client({
+      region: adapter.region,
+      credentials: {
+        accessKeyId: process.env.RECORDING_STORAGE_ACCESS_KEY,
+        secretAccessKey: process.env.RECORDING_STORAGE_SECRET,
+      },
+    });
+    await s3.send(new HeadObjectCommand({
+      Bucket: adapter.bucket,
+      Key: storageKey,
+    }));
+    return true;
+  } catch (err) {
+    console.error('Storage object existence check failed:', err?.message || err);
+    return false;
+  }
+}
+
 export const RECORDING_STATUS = {
   QUEUED: 'queued',
   STARTING: 'starting',
