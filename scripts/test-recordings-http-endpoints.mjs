@@ -31,6 +31,7 @@ async function run() {
   const timeId = Date.now();
   const hostEmail = `rec-host-${timeId}@example.com`;
   const partEmail = `rec-part-${timeId}@example.com`;
+  const crossEmail = `rec-cross-${timeId}@example.com`;
   const password = 'Password123!';
 
   // 1. Create Host User
@@ -41,17 +42,25 @@ async function run() {
   const partAuth = await supabaseAdmin.auth.admin.createUser({ email: partEmail, password, email_confirm: true });
   const partId = partAuth.data.user.id;
 
+  // 3. Create Cross-Tenant User
+  const crossAuth = await supabaseAdmin.auth.admin.createUser({ email: crossEmail, password, email_confirm: true });
+  const crossId = crossAuth.data.user.id;
+
   const hostClient = createClient(supabaseUrl, supabaseAnonKey);
   const partClient = createClient(supabaseUrl, supabaseAnonKey);
+  const crossClient = createClient(supabaseUrl, supabaseAnonKey);
 
   await hostClient.auth.signInWithPassword({ email: hostEmail, password });
   await partClient.auth.signInWithPassword({ email: partEmail, password });
+  await crossClient.auth.signInWithPassword({ email: crossEmail, password });
 
   const hostSession = (await hostClient.auth.getSession()).data.session;
   const partSession = (await partClient.auth.getSession()).data.session;
+  const crossSession = (await crossClient.auth.getSession()).data.session;
 
   await hostClient.rpc('ensure_user_profile_context', { p_user_id: hostId, p_email: hostEmail, p_full_name: 'Recording Host' });
   await partClient.rpc('ensure_user_profile_context', { p_user_id: partId, p_email: partEmail, p_full_name: 'Recording Part' });
+  await crossClient.rpc('ensure_user_profile_context', { p_user_id: crossId, p_email: crossEmail, p_full_name: 'Recording Cross' });
 
   try {
     // 3. Unauthenticated request to /api/recordings/start -> MUST RETURN 401
@@ -77,7 +86,18 @@ async function run() {
     });
     report('HTTP POST /api/recordings/start ordinary participant returns 403', resPartStart.status === 403, `status=${resPartStart.status}`);
 
-    // 6. Host calling /api/recordings/start on waiting meeting -> MUST RETURN 400 (meeting not live) or 503 (storage not configured)
+    // 6. Cross-Tenant User calling /api/recordings/start -> MUST RETURN 403
+    const resCrossStart = await fetch(`${apiBase}/recordings/start`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${crossSession.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ recordingId: recRow.id }),
+    });
+    report('HTTP POST /api/recordings/start cross-tenant user returns 403', resCrossStart.status === 403, `status=${resCrossStart.status}`);
+
+    // 7. Host calling /api/recordings/start on waiting meeting -> MUST RETURN 400 (meeting not live) or 503 (storage not configured)
     const resHostStartWaiting = await fetch(`${apiBase}/recordings/start`, {
       method: 'POST',
       headers: {
@@ -88,7 +108,7 @@ async function run() {
     });
     report('HTTP POST /api/recordings/start host on non-live meeting returns 400 or 503', [400, 503].includes(resHostStartWaiting.status), `status=${resHostStartWaiting.status}`);
 
-    // 7. Ordinary Participant calling /api/recordings/reconcile -> MUST RETURN 403
+    // 8. Ordinary Participant calling /api/recordings/reconcile -> MUST RETURN 403
     const resPartReconcile = await fetch(`${apiBase}/recordings/reconcile`, {
       method: 'POST',
       headers: {
@@ -98,7 +118,18 @@ async function run() {
     });
     report('HTTP POST /api/recordings/reconcile ordinary participant returns 403', resPartReconcile.status === 403, `status=${resPartReconcile.status}`);
 
-    // 8. Host calling /api/recordings/reconcile with meetingId -> MUST RETURN 200
+    // 9. Cross-Tenant User calling /api/recordings/reconcile with meetingId -> MUST RETURN 403
+    const resCrossReconcile = await fetch(`${apiBase}/recordings/reconcile`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${crossSession.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ meetingId: liveCreated.id }),
+    });
+    report('HTTP POST /api/recordings/reconcile cross-tenant user returns 403', resCrossReconcile.status === 403, `status=${resCrossReconcile.status}`);
+
+    // 10. Host calling /api/recordings/reconcile with meetingId -> MUST RETURN 200
     const resHostReconcile = await fetch(`${apiBase}/recordings/reconcile`, {
       method: 'POST',
       headers: {
@@ -109,7 +140,7 @@ async function run() {
     });
     report('HTTP POST /api/recordings/reconcile host with meetingId returns 200', resHostReconcile.status === 200, `status=${resHostReconcile.status}`);
 
-    // 9. Unauthenticated Webhook request -> MUST RETURN 401
+    // 11. Unauthenticated Webhook request -> MUST RETURN 401
     const resUnauthWebhook = await fetch(`${apiBase}/livekit/webhook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -117,7 +148,7 @@ async function run() {
     });
     report('HTTP POST /api/livekit/webhook unauthenticated returns 401', resUnauthWebhook.status === 401, `status=${resUnauthWebhook.status}`);
 
-    // 10. Ordinary Participant calling /api/recordings/playback-url -> MUST RETURN 403 or 409
+    // 12. Ordinary Participant calling /api/recordings/playback-url -> MUST RETURN 403 or 409
     const resPartPlayback = await fetch(`${apiBase}/recordings/playback-url`, {
       method: 'POST',
       headers: {
@@ -134,6 +165,7 @@ async function run() {
     if (redis) redis.disconnect();
     if (hostId) await supabaseAdmin.auth.admin.deleteUser(hostId).catch(() => undefined);
     if (partId) await supabaseAdmin.auth.admin.deleteUser(partId).catch(() => undefined);
+    if (crossId) await supabaseAdmin.auth.admin.deleteUser(crossId).catch(() => undefined);
     process.exit(process.exitCode || 0);
   }
 }

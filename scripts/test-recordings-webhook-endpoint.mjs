@@ -36,24 +36,41 @@ async function run() {
     });
     report('Unsigned webhook request rejected with 401', resUnauth.status === 401, `status=${resUnauth.status}`);
 
-    // 2. Test Terminal Monotonicity directly on database row:
-    const { data: meeting } = await supabaseAdmin.from('meetings').select('id, organization_id, workspace_id, host_id').limit(1).single();
+    // 2. Test Terminal Monotonicity on isolated meeting
+    const { data: baseMeeting } = await supabaseAdmin.from('meetings').select('id, organization_id, workspace_id, host_id').limit(1).single();
+
+    const { data: isoMeeting } = await supabaseAdmin.from('meetings').insert({
+      code: `LM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      title: 'Webhook Iso Meeting',
+      host_id: baseMeeting.host_id,
+      organization_id: baseMeeting.organization_id,
+      workspace_id: baseMeeting.workspace_id,
+      status: 'live',
+    }).select().single();
+
     const egressId = `EG_TEST_${Date.now()}`;
 
     const { data: completedRec } = await supabaseAdmin.from('meeting_recordings').insert({
-      meeting_id: meeting.id,
-      organization_id: meeting.organization_id,
-      workspace_id: meeting.workspace_id,
-      started_by: meeting.host_id,
+      meeting_id: isoMeeting.id,
+      organization_id: isoMeeting.organization_id,
+      workspace_id: isoMeeting.workspace_id,
+      started_by: isoMeeting.host_id,
       status: 'queued',
       egress_id: egressId,
       storage_key: 'test-key.mp4',
     }).select().single();
 
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'starting' }).eq('id', completedRec.id);
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'active' }).eq('id', completedRec.id);
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'stopping' }).eq('id', completedRec.id);
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'completed' }).eq('id', completedRec.id);
+    const { error: e1 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'starting' }).eq('id', completedRec.id);
+    if (e1) throw new Error(`Failed to transition to starting: ${e1.message}`);
+
+    const { error: e2 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'active' }).eq('id', completedRec.id);
+    if (e2) throw new Error(`Failed to transition to active: ${e2.message}`);
+
+    const { error: e3 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'stopping' }).eq('id', completedRec.id);
+    if (e3) throw new Error(`Failed to transition to stopping: ${e3.message}`);
+
+    const { error: e4 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'completed' }).eq('id', completedRec.id);
+    if (e4) throw new Error(`Failed to transition to completed: ${e4.message}`);
 
     try {
       // Attempt late update to FAILED on COMPLETED recording in DB
@@ -66,6 +83,9 @@ async function run() {
     } finally {
       if (completedRec?.id) {
         await supabaseAdmin.from('meeting_recordings').delete().eq('id', completedRec.id);
+      }
+      if (isoMeeting?.id) {
+        await supabaseAdmin.from('meetings').delete().eq('id', isoMeeting.id);
       }
     }
   } finally {
