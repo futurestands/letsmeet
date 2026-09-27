@@ -238,5 +238,16 @@ export function evaluateRecordingAccess({
     }
   }
 
+  if (action === 'playback') {
+    if (recording.status !== 'completed') {
+      return { ok: false, status: 409, error: 'Playback is available only for completed recordings.' };
+    }
+    const isHostOrAdmin = meeting.host_id === userId || ['host', 'co-host'].includes(role) || Boolean(isOrgAdmin);
+    if (!isHostOrAdmin) {
+      return { ok: false, status: 403, error: 'Unauthorized to access recording playback for this meeting.' };
+    }
+    return { ok: true, status: 200 };
+  }
+
   return { ok: true, status: 200 };
 }

@@ -1,13 +1,13 @@
-import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-
 dotenv.config({ path: '.env.staging.local' });
+process.env.NO_SERVER_LISTEN = '1';
+
+import { createClient } from '@supabase/supabase-js';
+import { app, redis } from '../server/livekit-token.mjs';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
-const tokenEndpoint = process.env.VITE_LIVEKIT_TOKEN_ENDPOINT || 'http://localhost:3001/api/livekit/token';
-const apiBase = process.env.TEST_API_BASE || tokenEndpoint.replace(/\/livekit\/token(?:\?.*)?$/, '');
 
 if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
   console.error('Missing staging configuration');
@@ -23,6 +23,10 @@ function report(name, ok, extra = '') {
 
 async function run() {
   console.log('=== VERIFYING RECORDING HTTP ENDPOINTS & AUTHORIZATION ===\n');
+
+  const server = app.listen(0);
+  const port = server.address().port;
+  const apiBase = `http://localhost:${port}/api`;
 
   const timeId = Date.now();
   const hostEmail = `rec-host-${timeId}@example.com`;
@@ -105,10 +109,32 @@ async function run() {
     });
     report('HTTP POST /api/recordings/reconcile host with meetingId returns 200', resHostReconcile.status === 200, `status=${resHostReconcile.status}`);
 
+    // 9. Unauthenticated Webhook request -> MUST RETURN 401
+    const resUnauthWebhook = await fetch(`${apiBase}/livekit/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'egress_ended' }),
+    });
+    report('HTTP POST /api/livekit/webhook unauthenticated returns 401', resUnauthWebhook.status === 401, `status=${resUnauthWebhook.status}`);
+
+    // 10. Ordinary Participant calling /api/recordings/playback-url -> MUST RETURN 403 or 409
+    const resPartPlayback = await fetch(`${apiBase}/recordings/playback-url`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${partSession.access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ recordingId: recRow.id }),
+    });
+    report('HTTP POST /api/recordings/playback-url ordinary participant returns 403 or 409', [403, 409].includes(resPartPlayback.status), `status=${resPartPlayback.status}`);
+
   } finally {
     console.log('\nCleaning up HTTP recording test users...');
-    await supabaseAdmin.auth.admin.deleteUser(hostId);
-    await supabaseAdmin.auth.admin.deleteUser(partId);
+    server.close();
+    if (redis) redis.disconnect();
+    if (hostId) await supabaseAdmin.auth.admin.deleteUser(hostId).catch(() => undefined);
+    if (partId) await supabaseAdmin.auth.admin.deleteUser(partId).catch(() => undefined);
+    process.exit(process.exitCode || 0);
   }
 }
 

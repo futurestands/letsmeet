@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import pLimit from 'p-limit';
 import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isValidRecordingTransition, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
-import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, verifyStorageObjectExists } from './recordings.mjs';
+import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, verifyStorageObjectExists, RECORDING_STATUS } from './recordings.mjs';
 import { aiStatusPayload, executeAiJob } from './ai.mjs';
 import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
@@ -22,6 +22,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,ht
 
 // Scalability: Redis initialization
 const redisUrl = process.env.REDIS_URL;
+export { redis };
 const redis = redisUrl ? new Redis(redisUrl, {
   maxRetriesPerRequest: 3,
   retryStrategy: (times) => Math.min(times * 50, 2000),
@@ -677,16 +678,68 @@ app.post('/api/recordings/stop', async (req, res) => {
   }
 });
 
+app.post('/api/recordings/playback-url', async (req, res) => {
+  const recordingId = String(req.body?.recordingId ?? '');
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+  if (!/^[0-9a-f-]{36}$/i.test(recordingId)) return res.status(400).json({ error: 'Recording identifier is invalid.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const { data: recording } = await supabaseAdmin
+      .from('meeting_recordings')
+      .select('id, meeting_id, organization_id, workspace_id, status, playback_url, storage_key')
+      .eq('id', recordingId)
+      .maybeSingle();
+
+    if (!recording) return res.status(404).json({ error: 'Recording not found.' });
+
+    const { data: meeting } = await supabaseAdmin
+      .from('meetings')
+      .select('id, code, host_id, status, organization_id, workspace_id')
+      .eq('id', recording.meeting_id)
+      .maybeSingle();
+
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
+
+    const accessDecision = evaluateRecordingAccess({
+      isAuthenticated: true,
+      userId: user.id,
+      meeting,
+      recording,
+      actorRole: meeting?.host_id === user.id ? 'host' : 'participant',
+      isOrgAdmin: Boolean(canManage),
+      action: 'playback',
+    });
+
+    if (!accessDecision.ok) {
+      return res.status(accessDecision.status).json({ error: accessDecision.error });
+    }
+
+    if (!recording.playback_url) {
+      return res.status(404).json({ error: 'Playback URL is not available for this recording.' });
+    }
+
+    return res.json({ ok: true, recordingId, playbackUrl: recording.playback_url });
+  } catch (error) {
+    console.error('Playback URL error:', error);
+    return res.status(500).json({ error: 'Internal server error while resolving playback URL.' });
+  }
+});
+
 app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json', 'application/json'] }), async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authorization header is required.' });
+  }
+
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   if (!apiKey || !apiSecret || !supabaseAdmin) {
     return res.status(503).json({ error: 'Webhook processing unavailable.' });
-  }
-
-  const authHeader = req.headers.authorization || '';
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Authorization header is required.' });
   }
 
   try {
@@ -800,27 +853,28 @@ app.post('/api/recordings/reconcile', async (req, res) => {
 
     const meetingId = req.body?.meetingId;
     if (meetingId) {
-      const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId, p_user_id: user.id });
-      if (!canManage) return res.status(403).json({ error: 'Unauthorized to reconcile recordings for this meeting.' });
+      const { data: canManage, error: rpcErr } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId, p_user_id: user.id });
+      if (rpcErr || !canManage) return res.status(403).json({ error: 'Unauthorized to reconcile recordings for this meeting.' });
     } else {
-      const { data: userOrgs } = await supabaseAdmin
-        .from('organization_memberships')
-        .select('organization_id, role')
-        .eq('user_id', user.id)
-        .in('role', ['owner', 'admin']);
-
-      if (!userOrgs?.length) {
-        return res.status(403).json({ error: 'System reconciliation requires administrative privileges.' });
-      }
+      return res.status(403).json({ error: 'System reconciliation without meeting ID requires administrative privileges.' });
     }
 
     const cutoffIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-    const { data: pendingRecordings } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('meeting_recordings')
       .select('id, meeting_id, egress_id, status, storage_key')
       .in('status', [RECORDING_STATUS.STARTING, RECORDING_STATUS.ACTIVE, RECORDING_STATUS.STOPPING])
-      .lte('updated_at', cutoffIso)
-      .limit(20);
+      .lte('updated_at', cutoffIso);
+
+    if (meetingId) {
+      query = query.eq('meeting_id', meetingId);
+    }
+
+    const { data: pendingRecordings, error: pendingErr } = await query.limit(20);
+    if (pendingErr) {
+      console.error('Pending recordings query error:', pendingErr);
+      return res.status(500).json({ error: 'Failed to query pending recordings.' });
+    }
 
     if (!pendingRecordings?.length) {
       return res.json({ ok: true, reconciledCount: 0 });
@@ -1067,11 +1121,22 @@ app.post('/api/ai/request', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error while requesting AI job.' });
   }
 });
-app.listen(port, () => {
-  logEvent('info', 'server.listen', { port });
-  console.log(`LiveKit token endpoint listening on http://localhost:${port}`);
-  setInterval(() => {
+export { app };
+
+let backgroundTimer = null;
+export function startBackgroundJobs() {
+  if (backgroundTimer) return;
+  backgroundTimer = setInterval(() => {
     void dispatchDueNotificationJobs();
     void processQueuedProviderJobs();
   }, 60_000);
-});
+  if (backgroundTimer.unref) backgroundTimer.unref();
+}
+
+if (process.env.NODE_ENV !== 'test' && !process.env.NO_SERVER_LISTEN) {
+  app.listen(port, () => {
+    logEvent('info', 'server.listen', { port });
+    console.log(`LiveKit token endpoint listening on http://localhost:${port}`);
+    startBackgroundJobs();
+  });
+}
