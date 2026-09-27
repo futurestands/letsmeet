@@ -3,38 +3,51 @@ import path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
 
+// Load ONLY staging environment file — do NOT load .env.local
 dotenv.config({ path: '.env.staging.local' });
-dotenv.config({ path: '.env.local' });
 
-const targetUrl = process.env.STAGING_DATABASE_URL || process.env.DATABASE_URL;
-const confirmation = process.env.STAGING_CONFIRMATION || '';
-const expectedProjectRef = process.env.STAGING_PROJECT_REF || 'uasslvisjnwhdhcgqwyc';
+const targetUrl = process.env.STAGING_DATABASE_URL;
+const projectRef = process.env.STAGING_PROJECT_REF;
+const confirmation = process.env.STAGING_CONFIRMATION;
 const productionProjectRef = process.env.PRODUCTION_PROJECT_REF || 'wvmmofornwivfsjeqmda';
 
 async function runStagingMigration() {
-  console.log('=== STAGING MIGRATION RUNNER ===\n');
+  console.log('=== STAGING MIGRATION RUNNER (STRICT FAIL-CLOSED) ===\n');
 
+  // Safety Gate 1: Require explicit STAGING_DATABASE_URL (no fallback to DATABASE_URL)
   if (!targetUrl) {
-    console.error('FAIL Missing STAGING_DATABASE_URL or DATABASE_URL environment variable.');
+    console.error('CRITICAL SAFETY BLOCK: STAGING_DATABASE_URL environment variable is missing. Fallback to DATABASE_URL is prohibited. Halting execution.');
     process.exit(1);
   }
 
-  // Safety Gate 1: Check production project ref protection
-  if (targetUrl.includes(productionProjectRef) || targetUrl.includes('wvmmofornwivfsjeqmda')) {
-    console.error('CRITICAL SAFETY BLOCK: Target connection appears to reference the PRODUCTION database. Halting execution immediately.');
-    process.exit(1);
-  }
-
-  // Safety Gate 2: Check staging project ref in target URL
-  if (!targetUrl.includes(expectedProjectRef) && !targetUrl.includes('uasslvisjnwhdhcgqwyc')) {
-    console.error(`CRITICAL SAFETY BLOCK: Target connection string does not match expected staging project ref (${expectedProjectRef}). Halting execution.`);
+  // Safety Gate 2: Require explicit STAGING_PROJECT_REF
+  if (!projectRef) {
+    console.error('CRITICAL SAFETY BLOCK: STAGING_PROJECT_REF environment variable is missing. Halting execution.');
     process.exit(1);
   }
 
   // Safety Gate 3: Require explicit STAGING_CONFIRMATION
-  const expectedConfirmation = `staging:${expectedProjectRef}`;
-  if (confirmation !== expectedConfirmation && confirmation !== 'staging:uasslvisjnwhdhcgqwyc') {
-    console.error(`CRITICAL SAFETY BLOCK: Invalid STAGING_CONFIRMATION '${confirmation}'. Expected '${expectedConfirmation}'. Halting execution.`);
+  if (!confirmation) {
+    console.error('CRITICAL SAFETY BLOCK: STAGING_CONFIRMATION environment variable is missing. Halting execution.');
+    process.exit(1);
+  }
+
+  // Safety Gate 4: Validate STAGING_CONFIRMATION exact match
+  const expectedConfirmation = `staging:${projectRef}`;
+  if (confirmation !== expectedConfirmation) {
+    console.error(`CRITICAL SAFETY BLOCK: STAGING_CONFIRMATION '${confirmation}' does not match expected '${expectedConfirmation}'. Halting execution.`);
+    process.exit(1);
+  }
+
+  // Safety Gate 5: Reject if target URL references production
+  if (targetUrl.includes(productionProjectRef) || targetUrl.includes('wvmmofornwivfsjeqmda') || targetUrl.toLowerCase().includes('production')) {
+    console.error('CRITICAL SAFETY BLOCK: Target connection string contains production references. Halting execution immediately.');
+    process.exit(1);
+  }
+
+  // Safety Gate 6: Reject if target URL does not contain STAGING_PROJECT_REF
+  if (!targetUrl.includes(projectRef)) {
+    console.error(`CRITICAL SAFETY BLOCK: Target connection string does not correspond to expected staging project ref (${projectRef}). Halting execution.`);
     process.exit(1);
   }
 
@@ -52,7 +65,7 @@ async function runStagingMigration() {
   }
 
   const sql = fs.readFileSync(migrationPath, 'utf-8');
-  console.log(`Applying migration file: ${migrationFile} to staging database (${expectedProjectRef})...`);
+  console.log(`Applying migration file: ${migrationFile} to verified staging database (${projectRef})...`);
 
   const client = new pg.Client({
     connectionString: targetUrl,
@@ -60,7 +73,7 @@ async function runStagingMigration() {
   });
 
   await client.connect();
-  console.log('Connected to staging PostgreSQL database cleanly.');
+  console.log('Connected to verified staging PostgreSQL database cleanly.');
 
   try {
     await client.query(sql);

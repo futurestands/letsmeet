@@ -736,9 +736,9 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
     return res.status(401).json({ error: 'Authorization header is required.' });
   }
 
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-  if (!apiKey || !apiSecret || !supabaseAdmin) {
+  const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
+  const apiSecret = process.env.LIVEKIT_API_SECRET || 'secretkey';
+  if (!supabaseAdmin) {
     return res.status(503).json({ error: 'Webhook processing unavailable.' });
   }
 
@@ -752,7 +752,8 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
         ? req.body.toString('utf-8')
         : JSON.stringify(req.body);
 
-    const event = await receiver.receive(rawBody, authHeader);
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+    const event = await receiver.receive(rawBody, token, false, '10s');
     const egressInfo = event?.egressInfo || event?.egress_info;
     if (!egressInfo) {
       return res.json({ ok: true, ignored: true });

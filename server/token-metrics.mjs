@@ -97,6 +97,7 @@ export function createTokenMetrics() {
       if (!ok) counts.moderationDenied += 1;
     },
     recordRecordingStarted() { counts.recordingStarted += 1; },
+    recordRecordingCompleted() { counts.recordingCompleted += 1; },
     recordRecordingFailed() { counts.recordingFailed += 1; },
     recordAiJobQueued() { counts.aiJobQueued += 1; },
     recordAiJobCompleted() { counts.aiJobCompleted += 1; },
