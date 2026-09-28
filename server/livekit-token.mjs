@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import pLimit from 'p-limit';
 import { evaluateLiveKitAccess, evaluateModerationAccess, evaluateRecordingAccess, isValidRecordingTransition, isAllowedRoomCode, normalizeRoomCode } from './livekit-auth.mjs';
 import { deliverEmailViaConfiguredProvider, deliverSmsViaConfiguredProvider, dispatchNotificationJob, notificationStatusPayload } from './notifications.mjs';
-import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, verifyStorageObjectExists, RECORDING_STATUS } from './recordings.mjs';
+import { createRecordingStorageAdapter, describeRecordingDispatch, recordingStatusPayload, verifyStorageObjectExists, RECORDING_STATUS, isIllegalTransitionError } from './recordings.mjs';
 import { aiStatusPayload, executeAiJob } from './ai.mjs';
 import { transcriptionStatusPayload, executeTranscriptionJob } from './transcription.mjs';
 import { createRateLimiter } from './rate-limit.mjs';
@@ -476,6 +476,48 @@ app.post('/api/livekit/moderate', async (req, res) => {
   }
 });
 
+/**
+ * Verify the recording object exists in storage before a recording may become COMPLETED.
+ * Returns { verified: true } | { verified: false, reason } (object definitively missing)
+ *       | { verified: null, transient: true } (could not determine; caller must not mutate state).
+ * When storage is not configured the check is skipped with a warning, unless
+ * RECORDING_REQUIRE_STORAGE_VERIFICATION=true, in which case completion is refused.
+ */
+async function verifyCompletionObject(storageKey) {
+  const storage = createRecordingStorageAdapter();
+  if (!storage) {
+    if (process.env.RECORDING_REQUIRE_STORAGE_VERIFICATION === 'true') {
+      return { verified: null, transient: true, reason: 'Storage is not configured; completion cannot be verified.' };
+    }
+    console.warn('Recording completion accepted WITHOUT storage verification: storage adapter not configured.');
+    return { verified: true, skipped: true };
+  }
+  try {
+    const exists = await verifyStorageObjectExists(storage, storageKey);
+    return exists
+      ? { verified: true }
+      : { verified: false, reason: 'Egress completed but output file could not be verified in storage.' };
+  } catch {
+    return { verified: null, transient: true, reason: 'Storage verification was inconclusive.' };
+  }
+}
+
+/**
+ * A recording status write was rejected. Trigger rejections (stale / out-of-order events) are
+ * acknowledged with an explicit ignored=true body so senders do not retry a permanent condition;
+ * anything else is a real persistence failure and returns 500 so it can be retried.
+ */
+async function respondToRejectedTransition(res, recordingId, updateErr, target) {
+  if (isIllegalTransitionError(updateErr)) {
+    const { data: current } = await supabaseAdmin
+      .from('meeting_recordings').select('status').eq('id', recordingId).maybeSingle();
+    console.warn(`Ignoring stale ${target} event for recording ${recordingId}: ${updateErr.message}`);
+    return res.json({ ok: true, ignored: true, reason: 'illegal_transition', recordingId, status: current?.status ?? null });
+  }
+  console.error(`Failed to persist ${target} for recording ${recordingId}:`, updateErr);
+  return res.status(500).json({ error: `Failed to persist ${target} state.` });
+}
+
 app.post('/api/recordings/start', async (req, res) => {
   const recordingId = String(req.body?.recordingId ?? '');
   const authorization = req.headers.authorization || '';
@@ -788,19 +830,22 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
       const storageKey = fileResult?.filename || recording.storage_key;
       const location = fileResult?.location || fileResult?.downloadUrl || fileResult?.download_url;
 
-      const storage = createRecordingStorageAdapter();
-      let objectVerified = true;
-      if (storage) {
-        objectVerified = await verifyStorageObjectExists(storage, storageKey);
+      const verification = await verifyCompletionObject(storageKey);
+
+      if (verification.verified === null) {
+        console.warn(`Deferring completion of recording ${recording.id}: ${verification.reason}`);
+        return res.status(503).json({ error: verification.reason, recordingId: recording.id, retryable: true });
       }
 
-      if (!objectVerified && storage) {
-        await supabaseAdmin.from('meeting_recordings').update({
+      if (verification.verified === false) {
+        const { error: verifyFailErr } = await supabaseAdmin.from('meeting_recordings').update({
           status: RECORDING_STATUS.FAILED,
-          error: 'Egress completed but output file could not be verified in storage.',
+          error: verification.reason,
           ended_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }).eq('id', recording.id);
+
+        if (verifyFailErr) return respondToRejectedTransition(res, recording.id, verifyFailErr, 'FAILED');
 
         tokenMetrics.recordRecordingFailed();
         return res.status(502).json({ error: 'Storage object verification failed.', recordingId: recording.id });
@@ -819,10 +864,7 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
         updated_at: new Date().toISOString(),
       }).eq('id', recording.id);
 
-      if (updateErr) {
-        console.error('Failed to update recording to COMPLETED:', updateErr);
-        return res.status(409).json({ error: `State transition to COMPLETED rejected by database: ${updateErr.message}` });
-      }
+      if (updateErr) return respondToRejectedTransition(res, recording.id, updateErr, 'COMPLETED');
 
       tokenMetrics.recordRecordingCompleted();
       return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.COMPLETED });
@@ -837,10 +879,7 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
         updated_at: new Date().toISOString(),
       }).eq('id', recording.id);
 
-      if (updateErr) {
-        console.error('Failed to update recording to FAILED:', updateErr);
-        return res.status(409).json({ error: `State transition to FAILED rejected by database: ${updateErr.message}` });
-      }
+      if (updateErr) return respondToRejectedTransition(res, recording.id, updateErr, 'FAILED');
 
       tokenMetrics.recordRecordingFailed();
       return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.FAILED });

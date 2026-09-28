@@ -114,7 +114,9 @@ async function run() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: payload,
       });
-      return res.status;
+      let body = null;
+      try { body = await res.json(); } catch { body = null; }
+      return { code: res.status, body };
     }
 
     async function rowStatus(id) {
@@ -129,7 +131,7 @@ async function run() {
       // 3. active + signed EGRESS_COMPLETE -> row becomes completed (or 502/failed if storage unconfigured)
       {
         const { rec, egressId } = await makeRecording('active');
-        const code = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/test.mp4' }] });
+        const { code, body } = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/test.mp4' }] });
         const st = await rowStatus(rec.id);
         const ok = (code === 200 && st === 'completed') || (code === 502 && st === 'failed');
         report('3. Signed EGRESS_COMPLETE on ACTIVE recording: HTTP result matches persisted row', ok, `http=${code} row=${st}`);
@@ -138,7 +140,7 @@ async function run() {
       // A. duplicate COMPLETED
       {
         const { rec, egressId } = await makeRecording('completed');
-        const code = await postWebhook(egressId, COMPLETE);
+        const { code, body } = await postWebhook(egressId, COMPLETE);
         const st = await rowStatus(rec.id);
         report('A. Duplicate EGRESS_COMPLETE on COMPLETED is idempotent 200, row stays completed', code === 200 && st === 'completed', `http=${code} row=${st}`);
       }
@@ -146,7 +148,7 @@ async function run() {
       // B. duplicate FAILED
       {
         const { rec, egressId } = await makeRecording('failed');
-        const code = await postWebhook(egressId, FAILED, { error: 'dup failure' });
+        const { code, body } = await postWebhook(egressId, FAILED, { error: 'dup failure' });
         const st = await rowStatus(rec.id);
         report('B. Duplicate EGRESS_FAILED on FAILED returns 200, row stays failed', code === 200 && st === 'failed', `http=${code} row=${st}`);
       }
@@ -154,7 +156,7 @@ async function run() {
       // C. COMPLETED -> late FAILED
       {
         const { rec, egressId } = await makeRecording('completed');
-        const code = await postWebhook(egressId, FAILED, { error: 'Late failure event' });
+        const { code, body } = await postWebhook(egressId, FAILED, { error: 'Late failure event' });
         const st = await rowStatus(rec.id);
         report('C. Late EGRESS_FAILED on COMPLETED rejected/ignored, row stays completed', [200, 409].includes(code) && st === 'completed', `http=${code} row=${st}`);
       }
@@ -162,15 +164,15 @@ async function run() {
       // D. FAILED -> late COMPLETED
       {
         const { rec, egressId } = await makeRecording('failed');
-        const code = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/late.mp4' }] });
+        const { code, body } = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/late.mp4' }] });
         const st = await rowStatus(rec.id);
-        report('D. Late EGRESS_COMPLETE on FAILED does not resurrect row and is not reported as success', st === 'failed' && [409, 502].includes(code), `http=${code} row=${st}`);
+        report('D. Late EGRESS_COMPLETE on FAILED is acknowledged as ignored, row stays failed and is not reported as completed', code === 200 && body?.ignored === true && body?.status === 'failed' && st === 'failed', `http=${code} ignored=${body?.ignored} row=${st}`);
       }
 
       // E. CANCELLED -> late COMPLETED
       {
         const { rec, egressId } = await makeRecording('cancelled');
-        const code = await postWebhook(egressId, COMPLETE);
+        const { code, body } = await postWebhook(egressId, COMPLETE);
         const st = await rowStatus(rec.id);
         report('E. Late EGRESS_COMPLETE on CANCELLED is idempotent 200, row stays cancelled', code === 200 && st === 'cancelled', `http=${code} row=${st}`);
       }
@@ -178,7 +180,7 @@ async function run() {
       // F. STOPPING -> FAILED
       {
         const { rec, egressId } = await makeRecording('stopping');
-        const code = await postWebhook(egressId, FAILED, { error: 'egress failed while stopping' });
+        const { code, body } = await postWebhook(egressId, FAILED, { error: 'egress failed while stopping' });
         const st = await rowStatus(rec.id);
         report('F. EGRESS_FAILED on STOPPING transitions row to failed', code === 200 && st === 'failed', `http=${code} row=${st}`);
       }
