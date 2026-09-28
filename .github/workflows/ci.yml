@@ -58,6 +58,7 @@ jobs:
           VITE_LIVEKIT_TOKEN_ENDPOINT: ${{ secrets.VITE_LIVEKIT_TOKEN_ENDPOINT }}
           VITE_LIVEKIT_URL: ${{ secrets.VITE_LIVEKIT_URL }}
           LIVEKIT_HOST: ${{ secrets.LIVEKIT_HOST }}
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_TEST_HOST_EMAIL: ${{ secrets.STAGING_TEST_HOST_EMAIL }}
           STAGING_TEST_HOST_PASSWORD: ${{ secrets.STAGING_TEST_HOST_PASSWORD }}
           STAGING_TEST_PARTICIPANT_EMAIL: ${{ secrets.STAGING_TEST_PARTICIPANT_EMAIL }}
@@ -73,5 +74,6 @@ jobs:
             node scripts/test-recordings-http-endpoints.mjs
             node scripts/test-recordings-webhook-endpoint.mjs
           else
-            echo "Staging secrets not configured in repository environment. Skipped runtime staging execution."
+            echo "::error::Staging secrets are not configured for this protected branch; refusing to report green without runtime verification."
+            exit 1
           fi

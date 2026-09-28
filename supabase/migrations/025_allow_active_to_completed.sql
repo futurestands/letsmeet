@@ -1,12 +1,9 @@
--- Migration 022: Database-level recording state machine transition enforcement and atomic start concurrency index.
--- Additive and corrective.
+-- Migration 025: Allow active -> completed in the recording state machine.
+-- Rationale: LiveKit can report EGRESS_COMPLETE while the row is still 'active'
+-- (e.g. egress ends without a prior stop request). Forward-only change; migration 022
+-- is intentionally left as originally applied. Idempotent (CREATE OR REPLACE).
+-- The trigger from 022 already points at this function, so no trigger DDL is needed.
 
--- 1. Atomic Start Concurrency: Ensure only ONE active/starting/stopping recording can exist per meeting in PostgreSQL
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_recording_per_meeting
-  ON public.meeting_recordings (meeting_id)
-  WHERE status IN ('starting', 'active', 'stopping');
-
--- 2. State machine transition validator function
 CREATE OR REPLACE FUNCTION public.enforce_recording_status_transition()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -30,7 +27,7 @@ BEGIN
         RAISE EXCEPTION 'Illegal recording status transition from starting to %', NEW.status;
       END IF;
     WHEN 'active' THEN
-      IF NEW.status NOT IN ('stopping', 'failed') THEN
+      IF NEW.status NOT IN ('stopping', 'completed', 'failed') THEN
         RAISE EXCEPTION 'Illegal recording status transition from active to %', NEW.status;
       END IF;
     WHEN 'stopping' THEN
@@ -54,10 +51,3 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.enforce_recording_status_transition() FROM PUBLIC;
-
--- 3. Trigger on meeting_recordings
-DROP TRIGGER IF EXISTS trg_enforce_recording_status_transition ON public.meeting_recordings;
-CREATE TRIGGER trg_enforce_recording_status_transition
-BEFORE UPDATE OF status ON public.meeting_recordings
-FOR EACH ROW
-EXECUTE FUNCTION public.enforce_recording_status_transition();

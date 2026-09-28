@@ -2,9 +2,12 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.staging.local' });
-dotenv.config({ path: '.env.local' });
 
-const targetUrl = process.env.STAGING_DATABASE_URL || process.env.DATABASE_URL;
+const targetUrl = process.env.STAGING_DATABASE_URL;
+if (!targetUrl) {
+  console.error('STAGING_DATABASE_URL is required (no fallback to DATABASE_URL, to avoid verifying the wrong database).');
+  process.exit(1);
+}
 
 function report(name, ok, extra = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
@@ -24,10 +27,21 @@ async function verifyCatalog() {
   try {
     // 1. Verify function enforce_recording_status_transition exists
     const resFunc = await client.query(`
-      SELECT proname, proname FROM pg_proc JOIN pg_namespace ON pg_proc.pronamespace = pg_namespace.oid
+      SELECT proname FROM pg_proc JOIN pg_namespace ON pg_proc.pronamespace = pg_namespace.oid
       WHERE pg_namespace.nspname = 'public' AND proname = 'enforce_recording_status_transition';
     `);
     report('1. Function public.enforce_recording_status_transition exists in catalog', resFunc.rows.length === 1);
+
+    // 1b. Verify function body definition allows active -> completed and maintains terminal state immutability
+    const resBody = await client.query(`
+      SELECT pg_get_functiondef(p.oid) AS def
+      FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+      WHERE n.nspname = 'public' AND p.proname = 'enforce_recording_status_transition';
+    `);
+    const def = resBody.rows[0]?.def || '';
+    const activeBlock = def.split("WHEN 'active' THEN")[1]?.split("WHEN 'stopping' THEN")[0] || '';
+    report('   Function body allows active -> completed (migration 025 applied)', activeBlock.includes("'completed'"));
+    report('   Function body keeps completed/cancelled terminal', def.includes('(terminal state)'));
 
     // 2. Verify trigger trg_enforce_recording_status_transition exists on meeting_recordings
     const resTrig = await client.query(`
