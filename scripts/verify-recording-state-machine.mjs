@@ -78,6 +78,28 @@ async function run() {
     await supabaseAdmin.from('meeting_recordings').delete().eq('id', recRow.id);
   }
 
+  // --- SECTION 1b: active -> completed direct (migration 025) ---
+  console.log('\n--- 1b. Testing active -> completed (migration 025) ---');
+  const { data: directRec } = await supabaseAdmin.from('meeting_recordings').insert({
+    meeting_id: meeting.id,
+    organization_id: meeting.organization_id,
+    workspace_id: meeting.workspace_id,
+    started_by: meeting.host_id,
+    status: 'queued',
+  }).select().single();
+
+  if (directRec) {
+    try {
+      await supabaseAdmin.from('meeting_recordings').update({ status: 'starting' }).eq('id', directRec.id);
+      await supabaseAdmin.from('meeting_recordings').update({ status: 'active' }).eq('id', directRec.id);
+      const { error: errDirect } = await supabaseAdmin.from('meeting_recordings').update({ status: 'completed' }).eq('id', directRec.id);
+      const { data: directRow } = await supabaseAdmin.from('meeting_recordings').select('status').eq('id', directRec.id).single();
+      report('active -> completed permitted', !errDirect && directRow?.status === 'completed', errDirect?.message ?? `status=${directRow?.status}`);
+    } finally {
+      await supabaseAdmin.from('meeting_recordings').delete().eq('id', directRec.id);
+    }
+  }
+
   // --- SECTION 2: ILLEGAL TRANSITIONS FROM TERMINAL STATES ---
   console.log('\n--- 2. Testing Terminal State Immutability (completed / cancelled) ---');
 

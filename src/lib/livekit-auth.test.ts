@@ -523,6 +523,7 @@ describe('Recording state machine transitions', () => {
     expect(isValidRecordingTransition('queued', 'starting')).toBe(true);
     expect(isValidRecordingTransition('starting', 'active')).toBe(true);
     expect(isValidRecordingTransition('active', 'stopping')).toBe(true);
+    expect(isValidRecordingTransition('active', 'completed')).toBe(true); // migration 025
     expect(isValidRecordingTransition('stopping', 'completed')).toBe(true);
     expect(isValidRecordingTransition('stopping', 'failed')).toBe(true);
     expect(isValidRecordingTransition('stopping', 'active')).toBe(true);

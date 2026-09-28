@@ -63,130 +63,130 @@ async function run() {
     });
     report('2. Invalid signature webhook request rejected with 401', resInvalidSig.status === 401, `status=${resInvalidSig.status}`);
 
-    // 3. Valid Signed Webhook Request targeting an active recording
+    // ---- Helpers: isolated meeting + recording walked to target status ----
     const { data: baseMeeting } = await supabaseAdmin.from('meetings').select('id, organization_id, workspace_id, host_id').limit(1).single();
+    const cleanup = [];
+    const PATHS = {
+      active: ['starting', 'active'],
+      stopping: ['starting', 'active', 'stopping'],
+      completed: ['starting', 'active', 'stopping', 'completed'],
+      failed: ['starting', 'failed'],
+      cancelled: ['cancelled'],
+    };
 
-    const { data: isoMeeting } = await supabaseAdmin.from('meetings').insert({
-      code: `LM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      title: 'Webhook Signed Meeting',
-      host_id: baseMeeting.host_id,
-      organization_id: baseMeeting.organization_id,
-      workspace_id: baseMeeting.workspace_id,
-      status: 'live',
-    }).select().single();
+    async function makeRecording(target) {
+      const { data: m } = await supabaseAdmin.from('meetings').insert({
+        code: `LM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        title: `Webhook ${target}`,
+        host_id: baseMeeting.host_id,
+        organization_id: baseMeeting.organization_id,
+        workspace_id: baseMeeting.workspace_id,
+        status: 'live',
+      }).select().single();
 
-    const egressId = `EG_TEST_${Date.now()}`;
+      const egressId = `EG_${target}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const { data: rec } = await supabaseAdmin.from('meeting_recordings').insert({
+        meeting_id: m.id,
+        organization_id: m.organization_id,
+        workspace_id: m.workspace_id,
+        started_by: m.host_id,
+        status: 'queued',
+        egress_id: egressId,
+        storage_key: `${egressId}.mp4`,
+      }).select().single();
 
-    const { data: testRec } = await supabaseAdmin.from('meeting_recordings').insert({
-      meeting_id: isoMeeting.id,
-      organization_id: isoMeeting.organization_id,
-      workspace_id: isoMeeting.workspace_id,
-      started_by: isoMeeting.host_id,
-      status: 'queued',
-      egress_id: egressId,
-      storage_key: 'test-signed-key.mp4',
-    }).select().single();
-
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'starting' }).eq('id', testRec.id);
-    await supabaseAdmin.from('meeting_recordings').update({ status: 'active' }).eq('id', testRec.id);
-
-    try {
-      const webhookPayload = JSON.stringify({
-        event: 'egress_ended',
-        egressInfo: {
-          egressId,
-          status: 3, // EGRESS_COMPLETE
-          fileResults: [{ filename: 'test-signed-key.mp4', location: 'https://storage.staging/test.mp4' }],
-        },
-      });
-
-      const validToken = await signWebhookPayload(webhookPayload, apiKey, apiSecret);
-
-      const resValidSigned = await fetch(`${apiBase}/livekit/webhook`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${validToken}`,
-        },
-        body: webhookPayload,
-      });
-
-      report('3. Valid HMAC-signed webhook signature accepted by WebhookReceiver HTTP route', [200, 502].includes(resValidSigned.status), `status=${resValidSigned.status}`);
-
-    } finally {
-      if (testRec?.id) {
-        await supabaseAdmin.from('meeting_recordings').delete().eq('id', testRec.id);
+      cleanup.push({ rec, m });
+      for (const step of PATHS[target]) {
+        const { error } = await supabaseAdmin.from('meeting_recordings').update({ status: step }).eq('id', rec.id);
+        if (error) throw new Error(`setup ${target}: ${step} rejected: ${error.message}`);
       }
-      if (isoMeeting?.id) {
-        await supabaseAdmin.from('meetings').delete().eq('id', isoMeeting.id);
-      }
+      return { rec, egressId };
     }
 
-    // 4. Test Late EGRESS_FAILED webhook POSTed at COMPLETED recording over HTTP route
-    const { data: isoMeeting2 } = await supabaseAdmin.from('meetings').insert({
-      code: `LM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      title: 'Webhook Terminal Iso Meeting',
-      host_id: baseMeeting.host_id,
-      organization_id: baseMeeting.organization_id,
-      workspace_id: baseMeeting.workspace_id,
-      status: 'live',
-    }).select().single();
+    async function postWebhook(egressId, status, extra = {}) {
+      const payload = JSON.stringify({
+        event: 'egress_ended',
+        egressInfo: { egressId, status, ...extra },
+      });
+      const token = await signWebhookPayload(payload, apiKey, apiSecret);
+      const res = await fetch(`${apiBase}/livekit/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: payload,
+      });
+      return res.status;
+    }
 
-    const egressIdCompleted = `EG_COMP_${Date.now()}`;
-    const { data: recCompleted } = await supabaseAdmin.from('meeting_recordings').insert({
-      meeting_id: isoMeeting2.id,
-      organization_id: isoMeeting2.organization_id,
-      workspace_id: isoMeeting2.workspace_id,
-      started_by: isoMeeting2.host_id,
-      status: 'queued',
-      egress_id: egressIdCompleted,
-      storage_key: 'completed-key.mp4',
-    }).select().single();
+    async function rowStatus(id) {
+      const { data } = await supabaseAdmin.from('meeting_recordings').select('status').eq('id', id).single();
+      return data?.status;
+    }
 
-    const { error: e1 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'starting' }).eq('id', recCompleted.id);
-    if (e1) throw new Error(`Failed to transition to starting: ${e1.message}`);
-
-    const { error: e2 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'active' }).eq('id', recCompleted.id);
-    if (e2) throw new Error(`Failed to transition to active: ${e2.message}`);
-
-    const { error: e3 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'stopping' }).eq('id', recCompleted.id);
-    if (e3) throw new Error(`Failed to transition to stopping: ${e3.message}`);
-
-    const { error: e4 } = await supabaseAdmin.from('meeting_recordings').update({ status: 'completed' }).eq('id', recCompleted.id);
-    if (e4) throw new Error(`Failed to transition to completed: ${e4.message}`);
+    const COMPLETE = 3;
+    const FAILED = 4;
 
     try {
-      const lateFailedPayload = JSON.stringify({
-        event: 'egress_ended',
-        egressInfo: {
-          egressId: egressIdCompleted,
-          status: 4, // EGRESS_FAILED
-          error: 'Late failure event',
-        },
-      });
+      // 3. active + signed EGRESS_COMPLETE -> row becomes completed (or 502/failed if storage unconfigured)
+      {
+        const { rec, egressId } = await makeRecording('active');
+        const code = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/test.mp4' }] });
+        const st = await rowStatus(rec.id);
+        const ok = (code === 200 && st === 'completed') || (code === 502 && st === 'failed');
+        report('3. Signed EGRESS_COMPLETE on ACTIVE recording: HTTP result matches persisted row', ok, `http=${code} row=${st}`);
+      }
 
-      const lateToken = await signWebhookPayload(lateFailedPayload, apiKey, apiSecret);
+      // A. duplicate COMPLETED
+      {
+        const { rec, egressId } = await makeRecording('completed');
+        const code = await postWebhook(egressId, COMPLETE);
+        const st = await rowStatus(rec.id);
+        report('A. Duplicate EGRESS_COMPLETE on COMPLETED is idempotent 200, row stays completed', code === 200 && st === 'completed', `http=${code} row=${st}`);
+      }
 
-      const resLateWebhook = await fetch(`${apiBase}/livekit/webhook`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${lateToken}`,
-        },
-        body: lateFailedPayload,
-      });
+      // B. duplicate FAILED
+      {
+        const { rec, egressId } = await makeRecording('failed');
+        const code = await postWebhook(egressId, FAILED, { error: 'dup failure' });
+        const st = await rowStatus(rec.id);
+        report('B. Duplicate EGRESS_FAILED on FAILED returns 200, row stays failed', code === 200 && st === 'failed', `http=${code} row=${st}`);
+      }
 
-      report('4. Late EGRESS_FAILED webhook on COMPLETED recording handled safely by HTTP route', [200, 409].includes(resLateWebhook.status), `status=${resLateWebhook.status}`);
+      // C. COMPLETED -> late FAILED
+      {
+        const { rec, egressId } = await makeRecording('completed');
+        const code = await postWebhook(egressId, FAILED, { error: 'Late failure event' });
+        const st = await rowStatus(rec.id);
+        report('C. Late EGRESS_FAILED on COMPLETED rejected/ignored, row stays completed', [200, 409].includes(code) && st === 'completed', `http=${code} row=${st}`);
+      }
 
-      const { data: checkRowAfterWebhook } = await supabaseAdmin.from('meeting_recordings').select('status').eq('id', recCompleted.id).single();
-      report('   Recording status remains completed in database', checkRowAfterWebhook?.status === 'completed', `status=${checkRowAfterWebhook?.status}`);
+      // D. FAILED -> late COMPLETED
+      {
+        const { rec, egressId } = await makeRecording('failed');
+        const code = await postWebhook(egressId, COMPLETE, { fileResults: [{ filename: `${egressId}.mp4`, location: 'https://storage.staging/late.mp4' }] });
+        const st = await rowStatus(rec.id);
+        report('D. Late EGRESS_COMPLETE on FAILED does not resurrect row and is not reported as success', st === 'failed' && [409, 502].includes(code), `http=${code} row=${st}`);
+      }
+
+      // E. CANCELLED -> late COMPLETED
+      {
+        const { rec, egressId } = await makeRecording('cancelled');
+        const code = await postWebhook(egressId, COMPLETE);
+        const st = await rowStatus(rec.id);
+        report('E. Late EGRESS_COMPLETE on CANCELLED is idempotent 200, row stays cancelled', code === 200 && st === 'cancelled', `http=${code} row=${st}`);
+      }
+
+      // F. STOPPING -> FAILED
+      {
+        const { rec, egressId } = await makeRecording('stopping');
+        const code = await postWebhook(egressId, FAILED, { error: 'egress failed while stopping' });
+        const st = await rowStatus(rec.id);
+        report('F. EGRESS_FAILED on STOPPING transitions row to failed', code === 200 && st === 'failed', `http=${code} row=${st}`);
+      }
 
     } finally {
-      if (recCompleted?.id) {
-        await supabaseAdmin.from('meeting_recordings').delete().eq('id', recCompleted.id);
-      }
-      if (isoMeeting2?.id) {
-        await supabaseAdmin.from('meetings').delete().eq('id', isoMeeting2.id);
+      for (const { rec, m } of cleanup) {
+        if (rec?.id) await supabaseAdmin.from('meeting_recordings').delete().eq('id', rec.id).catch(() => undefined);
+        if (m?.id) await supabaseAdmin.from('meetings').delete().eq('id', m.id).catch(() => undefined);
       }
     }
   } finally {
