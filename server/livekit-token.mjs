@@ -811,7 +811,7 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
             ? `${process.env.RECORDING_PLAYBACK_BASE_URL.replace(/\/$/, '')}/${storageKey}`
             : null);
 
-      await supabaseAdmin.from('meeting_recordings').update({
+      const { error: updateErr } = await supabaseAdmin.from('meeting_recordings').update({
         status: RECORDING_STATUS.COMPLETED,
         storage_key: storageKey,
         playback_url: playbackUrl,
@@ -819,18 +819,28 @@ app.post('/api/livekit/webhook', express.raw({ type: ['application/webhook+json'
         updated_at: new Date().toISOString(),
       }).eq('id', recording.id);
 
+      if (updateErr) {
+        console.error('Failed to update recording to COMPLETED:', updateErr);
+        return res.status(409).json({ error: `State transition to COMPLETED rejected by database: ${updateErr.message}` });
+      }
+
       tokenMetrics.recordRecordingCompleted();
       return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.COMPLETED });
     }
 
     if (isFailed) {
       const errorMsg = egressInfo.error || 'LiveKit egress reported failure.';
-      await supabaseAdmin.from('meeting_recordings').update({
+      const { error: updateErr } = await supabaseAdmin.from('meeting_recordings').update({
         status: RECORDING_STATUS.FAILED,
         error: errorMsg,
         ended_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('id', recording.id);
+
+      if (updateErr) {
+        console.error('Failed to update recording to FAILED:', updateErr);
+        return res.status(409).json({ error: `State transition to FAILED rejected by database: ${updateErr.message}` });
+      }
 
       tokenMetrics.recordRecordingFailed();
       return res.json({ ok: true, recordingId: recording.id, status: RECORDING_STATUS.FAILED });

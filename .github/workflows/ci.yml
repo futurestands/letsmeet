@@ -68,6 +68,10 @@ jobs:
             node scripts/verify-all-sprint-objectives.mjs
             node scripts/staging-token-acceptance.mjs
             node scripts/staging-invitation-e2e.mjs
+            node scripts/verify-staging-catalog-schema.mjs
+            node scripts/verify-recording-state-machine.mjs
+            node scripts/test-recordings-http-endpoints.mjs
+            node scripts/test-recordings-webhook-endpoint.mjs
           else
             echo "Staging secrets not configured in repository environment. Skipped runtime staging execution."
           fi

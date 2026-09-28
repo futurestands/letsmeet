@@ -30,7 +30,7 @@ BEGIN
         RAISE EXCEPTION 'Illegal recording status transition from starting to %', NEW.status;
       END IF;
     WHEN 'active' THEN
-      IF NEW.status NOT IN ('stopping', 'failed') THEN
+      IF NEW.status NOT IN ('stopping', 'completed', 'failed') THEN
         RAISE EXCEPTION 'Illegal recording status transition from active to %', NEW.status;
       END IF;
     WHEN 'stopping' THEN

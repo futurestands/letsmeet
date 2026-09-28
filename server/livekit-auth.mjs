@@ -171,7 +171,7 @@ export function evaluateModerationAccess({
 const VALID_RECORDING_TRANSITIONS = {
   queued: ['starting', 'cancelled', 'failed'],
   starting: ['active', 'failed', 'cancelled'],
-  active: ['stopping', 'failed'],
+  active: ['stopping', 'completed', 'failed'],
   stopping: ['completed', 'failed', 'active'],
   completed: [],
   failed: ['queued', 'starting'],
