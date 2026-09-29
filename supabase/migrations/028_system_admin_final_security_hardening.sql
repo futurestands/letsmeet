@@ -83,3 +83,14 @@ DROP POLICY IF EXISTS "System audit logs insertable strictly by system admins" O
 
 CREATE POLICY "System audit logs insertable strictly by system admins" ON public.system_audit_logs
   FOR INSERT WITH CHECK (public.is_system_admin());
+
+-- 4. Set search_path = public on legacy rls_auto_enable function
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'rls_auto_enable'
+  ) THEN
+    ALTER FUNCTION public.rls_auto_enable() SET search_path = public;
+  END IF;
+END $$;

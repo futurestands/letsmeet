@@ -1273,18 +1273,64 @@ app.get('/api/system-admin/health', async (req, res) => {
   if (!user) return;
 
   try {
-    const livekitOk = Boolean(process.env.LIVEKIT_HOST && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
-    const storageOk = Boolean(process.env.RECORDING_STORAGE_BUCKET && process.env.RECORDING_STORAGE_ACCESS_KEY);
-    const redisOk = Boolean(process.env.REDIS_URL);
+    // 1. PostgreSQL DB Query Reachability Test
+    let dbStatus = 'UNREACHABLE';
+    let dbNote = 'PostgreSQL query failed';
+    if (supabaseAdmin) {
+      const { error: dbErr } = await supabaseAdmin.from('users').select('id').limit(1);
+      if (!dbErr) {
+        dbStatus = 'HEALTHY';
+        dbNote = 'PostgreSQL database query succeeded';
+      }
+    }
+
+    // 2. Redis Reachability Test
+    let redisStatus = process.env.REDIS_URL ? 'UNREACHABLE' : 'NOT_CONFIGURED';
+    let redisNote = process.env.REDIS_URL ? 'Redis ping failed' : 'In-memory rate limit fallback active';
+    if (redis) {
+      try {
+        const pingRes = await redis.ping();
+        if (pingRes === 'PONG') {
+          redisStatus = 'HEALTHY';
+          redisNote = 'Redis connected and responding to PING';
+        }
+      } catch {
+        redisStatus = 'UNREACHABLE';
+      }
+    }
+
+    // 3. LiveKit Reachability Test
+    let livekitStatus = 'NOT_CONFIGURED';
+    let livekitNote = 'LiveKit credentials missing';
+    if (process.env.LIVEKIT_HOST && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET) {
+      try {
+        const lkRes = await fetch(`${process.env.LIVEKIT_HOST.replace(/\/$/, '')}`, { method: 'HEAD' });
+        if ([200, 404, 405].includes(lkRes.status)) {
+          livekitStatus = 'HEALTHY';
+          livekitNote = 'LiveKit SFU server responding to HTTP health probe';
+        } else {
+          livekitStatus = 'DEGRADED';
+          livekitNote = `LiveKit server returned status ${lkRes.status}`;
+        }
+      } catch {
+        livekitStatus = 'UNREACHABLE';
+        livekitNote = 'LiveKit SFU host unreachable';
+      }
+    }
+
+    // 4. Object Storage Reachability Status
+    const storageConfigured = Boolean(process.env.RECORDING_STORAGE_BUCKET && process.env.RECORDING_STORAGE_ACCESS_KEY);
+    const storageStatus = storageConfigured ? 'HEALTHY' : 'NOT_CONFIGURED';
+    const storageNote = storageConfigured ? 'S3/R2 storage credentials configured' : 'S3/R2 storage credentials unconfigured (PROVIDER REQUIRED)';
 
     return res.json({
       ok: true,
       services: {
         api: { status: 'HEALTHY', note: 'Token & System Admin API online' },
-        database: { status: 'HEALTHY', note: 'PostgreSQL connection active' },
-        redis: { status: redisOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: redisOk ? 'Redis connected' : 'In-memory rate limit fallback active' },
-        livekit: { status: livekitOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: livekitOk ? 'LiveKit SFU host configured' : 'LiveKit credentials missing' },
-        storage: { status: storageOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: storageOk ? 'S3/R2 storage configured' : 'S3/R2 credentials missing' },
+        database: { status: dbStatus, note: dbNote },
+        redis: { status: redisStatus, note: redisNote },
+        livekit: { status: livekitStatus, note: livekitNote },
+        storage: { status: storageStatus, note: storageNote },
       },
     });
   } catch (err) {
