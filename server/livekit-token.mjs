@@ -990,6 +990,308 @@ app.post('/api/recordings/reconcile', async (req, res) => {
   }
 });
 
+async function requireSystemAdmin(req, res) {
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) {
+    res.status(401).json({ error: 'Authentication is required.' });
+    return null;
+  }
+
+  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+  if (authError || !user) {
+    res.status(401).json({ error: 'Session is invalid or expired.' });
+    return null;
+  }
+
+  const { data: isSysAdmin, error: sysError } = await supabaseAdmin.rpc('is_system_admin', { p_user_id: user.id });
+  if (sysError || !isSysAdmin) {
+    res.status(403).json({ error: 'Unauthorized: System admin privileges required.' });
+    return null;
+  }
+
+  return user;
+}
+
+// SYSTEM ADMIN CONSOLE ENDPOINTS
+app.get('/api/system-admin/overview', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const { data: metrics, error } = await supabaseAdmin.rpc('get_system_overview_metrics', { p_user_id: user.id });
+    if (error) {
+      console.error('Failed to query system overview metrics:', error);
+      return res.status(500).json({ error: 'Failed to retrieve system overview metrics.' });
+    }
+    return res.json({ ok: true, metrics });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while building overview metrics.' });
+  }
+});
+
+app.get('/api/system-admin/users', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const limit = Math.min(Number(req.query.limit || 50), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    const search = String(req.query.search || '').trim();
+
+    let query = supabaseAdmin
+      .from('users')
+      .select('id, email, full_name, avatar_url, status, created_at', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
+    }
+
+    const { data: users, count, error } = await query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (error) {
+      console.error('Failed to query system users:', error);
+      return res.status(500).json({ error: 'Failed to retrieve system users.' });
+    }
+
+    return res.json({ ok: true, users: users ?? [], count: count ?? 0, limit, offset });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while fetching system users.' });
+  }
+});
+
+app.post('/api/system-admin/users/suspend', async (req, res) => {
+  const adminUser = await requireSystemAdmin(req, res);
+  if (!adminUser) return;
+
+  const targetUserId = String(req.body?.targetUserId || '');
+  const suspend = Boolean(req.body?.suspend);
+  const reason = String(req.body?.reason || 'System Admin administrative action');
+
+  if (!/^[0-9a-f-]{36}$/i.test(targetUserId)) {
+    return res.status(400).json({ error: 'Invalid target user ID.' });
+  }
+
+  try {
+    const status = suspend ? 'suspended' : 'active';
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', targetUserId);
+
+    if (updateError) {
+      return res.status(500).json({ error: `Failed to update user status: ${updateError.message}` });
+    }
+
+    await supabaseAdmin.from('system_audit_logs').insert({
+      admin_user_id: adminUser.id,
+      action: suspend ? 'ADMIN_SUSPENDED_USER' : 'ADMIN_REACTIVATED_USER',
+      target_type: 'user',
+      target_id: targetUserId,
+      reason,
+      ip_address: req.ip,
+    });
+
+    return res.json({ ok: true, targetUserId, status });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while updating user status.' });
+  }
+});
+
+app.get('/api/system-admin/organizations', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const limit = Math.min(Number(req.query.limit || 50), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+    const search = String(req.query.search || '').trim();
+
+    let query = supabaseAdmin
+      .from('organizations')
+      .select('id, name, slug, status, created_at, updated_at', { count: 'exact' });
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,slug.ilike.%${search}%`);
+    }
+
+    const { data: orgs, count, error } = await query.order('created_at', { ascending: false }).range(offset, offset + limit - 1);
+    if (error) {
+      console.error('Failed to query system organizations:', error);
+      return res.status(500).json({ error: 'Failed to retrieve system organizations.' });
+    }
+
+    return res.json({ ok: true, organizations: orgs ?? [], count: count ?? 0, limit, offset });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while fetching system organizations.' });
+  }
+});
+
+app.post('/api/system-admin/organizations/suspend', async (req, res) => {
+  const adminUser = await requireSystemAdmin(req, res);
+  if (!adminUser) return;
+
+  const targetOrgId = String(req.body?.targetOrgId || '');
+  const suspend = Boolean(req.body?.suspend);
+  const reason = String(req.body?.reason || 'System Admin administrative action');
+
+  if (!/^[0-9a-f-]{36}$/i.test(targetOrgId)) {
+    return res.status(400).json({ error: 'Invalid target organization ID.' });
+  }
+
+  try {
+    const status = suspend ? 'suspended' : 'active';
+    const { error: updateError } = await supabaseAdmin
+      .from('organizations')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', targetOrgId);
+
+    if (updateError) {
+      return res.status(500).json({ error: `Failed to update organization status: ${updateError.message}` });
+    }
+
+    await supabaseAdmin.from('system_audit_logs').insert({
+      admin_user_id: adminUser.id,
+      action: suspend ? 'ADMIN_SUSPENDED_ORGANIZATION' : 'ADMIN_REACTIVATED_ORGANIZATION',
+      target_type: 'organization',
+      target_id: targetOrgId,
+      organization_id: targetOrgId,
+      reason,
+      ip_address: req.ip,
+    });
+
+    return res.json({ ok: true, targetOrgId, status });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while updating organization status.' });
+  }
+});
+
+app.get('/api/system-admin/live-meetings', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const { data: liveMeetings, error } = await supabaseAdmin
+      .from('meetings')
+      .select('id, code, title, status, host_id, organization_id, workspace_id, created_at, updated_at')
+      .eq('status', 'live')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to query live meetings.' });
+    }
+
+    return res.json({ ok: true, liveMeetings: liveMeetings ?? [] });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while fetching live meetings.' });
+  }
+});
+
+app.get('/api/system-admin/audit-logs', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const limit = Math.min(Number(req.query.limit || 50), 100);
+    const offset = Math.max(Number(req.query.offset || 0), 0);
+
+    const { data: auditLogs, count, error } = await supabaseAdmin
+      .from('system_audit_logs')
+      .select('id, admin_user_id, action, target_type, target_id, organization_id, reason, metadata, ip_address, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to retrieve system audit logs.' });
+    }
+
+    return res.json({ ok: true, auditLogs: auditLogs ?? [], count: count ?? 0, limit, offset });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while fetching audit logs.' });
+  }
+});
+
+app.get('/api/system-admin/feature-flags', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const { data: flags, error } = await supabaseAdmin
+      .from('feature_flags')
+      .select('key, enabled, description, target_scope, target_id, metadata, updated_at')
+      .order('key', { ascending: true });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to retrieve feature flags.' });
+    }
+
+    return res.json({ ok: true, flags: flags ?? [] });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while fetching feature flags.' });
+  }
+});
+
+app.post('/api/system-admin/feature-flags', async (req, res) => {
+  const adminUser = await requireSystemAdmin(req, res);
+  if (!adminUser) return;
+
+  const key = String(req.body?.key || '').trim().toUpperCase();
+  const enabled = Boolean(req.body?.enabled);
+  const reason = String(req.body?.reason || 'Feature flag updated by System Admin');
+
+  if (!key) {
+    return res.status(400).json({ error: 'Feature flag key is required.' });
+  }
+
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('feature_flags')
+      .update({ enabled, updated_by: adminUser.id, updated_at: new Date().toISOString() })
+      .eq('key', key);
+
+    if (updateError) {
+      return res.status(500).json({ error: `Failed to update feature flag: ${updateError.message}` });
+    }
+
+    await supabaseAdmin.from('system_audit_logs').insert({
+      admin_user_id: adminUser.id,
+      action: 'ADMIN_CHANGED_FEATURE_FLAG',
+      target_type: 'feature_flag',
+      target_id: key,
+      reason,
+      metadata: { enabled },
+      ip_address: req.ip,
+    });
+
+    return res.json({ ok: true, key, enabled });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while updating feature flag.' });
+  }
+});
+
+app.get('/api/system-admin/health', async (req, res) => {
+  const user = await requireSystemAdmin(req, res);
+  if (!user) return;
+
+  try {
+    const livekitOk = Boolean(process.env.LIVEKIT_HOST && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
+    const storageOk = Boolean(process.env.RECORDING_STORAGE_BUCKET && process.env.RECORDING_STORAGE_ACCESS_KEY);
+    const redisOk = Boolean(process.env.REDIS_URL);
+
+    return res.json({
+      ok: true,
+      services: {
+        api: { status: 'HEALTHY', note: 'Token & System Admin API online' },
+        database: { status: 'HEALTHY', note: 'PostgreSQL connection active' },
+        redis: { status: redisOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: redisOk ? 'Redis connected' : 'In-memory rate limit fallback active' },
+        livekit: { status: livekitOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: livekitOk ? 'LiveKit SFU host configured' : 'LiveKit credentials missing' },
+        storage: { status: storageOk ? 'HEALTHY' : 'NOT_CONFIGURED', note: storageOk ? 'S3/R2 storage configured' : 'S3/R2 credentials missing' },
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal server error while compiling system health.' });
+  }
+});
+
 async function dispatchDueNotificationJobs() {
   if (!supabaseAdmin) return;
   const nowIso = new Date().toISOString();

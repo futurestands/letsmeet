@@ -63,6 +63,8 @@ function MeetingSessionRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+const SystemAdminConsole = lazy(() => import('./pages/SystemAdminConsole'));
+
 function App() {
   return (
     <AuthProvider>
@@ -77,6 +79,7 @@ function App() {
           <Route path="/meetings" element={<ProtectedRoute><Meetings /></ProtectedRoute>} />
           <Route path="/meetings/:meetingId" element={<ProtectedRoute><MeetingDetails /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/system-admin/*" element={<ProtectedRoute><PageLoader><SystemAdminConsole /></PageLoader></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
