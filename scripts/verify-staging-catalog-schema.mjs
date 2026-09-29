@@ -20,6 +20,8 @@ async function verifyCatalog() {
   const client = new pg.Client({
     connectionString: targetUrl,
     ssl: { rejectUnauthorized: false },
+    connectionTimeoutMillis: 5000,
+    keepAlive: true,
   });
 
   await client.connect();
@@ -72,7 +74,8 @@ async function verifyCatalog() {
     report('4. Function public.can_manage_recordings has exactly 1 active signature (no orphaned overload)', resCanManage.rows.length === 1, `args: ${resCanManage.rows[0]?.args}`);
 
   } finally {
-    await client.end();
+    await client.end().catch(() => undefined);
+    process.exit(process.exitCode || 0);
   }
 }
 
