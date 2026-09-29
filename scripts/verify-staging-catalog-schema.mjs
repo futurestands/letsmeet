@@ -65,13 +65,25 @@ async function verifyCatalog() {
     const indexDef = resIndex.rows[0]?.indexdef || '';
     report('   Index predicate covers starting, active, stopping', indexDef.includes('starting') && indexDef.includes('active') && indexDef.includes('stopping'));
 
-    // 4. Verify can_manage_recordings overload count
+    // 4. Verify can_manage_recordings overload count & can_manage_recordings_for_user
     const resCanManage = await client.query(`
       SELECT proname, pg_get_function_identity_arguments(pg_proc.oid) as args
       FROM pg_proc JOIN pg_namespace ON pg_proc.pronamespace = pg_namespace.oid
-      WHERE pg_namespace.nspname = 'public' AND proname = 'can_manage_recordings';
+      WHERE pg_namespace.nspname = 'public' AND proname IN ('can_manage_recordings', 'can_manage_recordings_for_user');
     `);
-    report('4. Function public.can_manage_recordings has exactly 1 active signature (no orphaned overload)', resCanManage.rows.length === 1, `args: ${resCanManage.rows[0]?.args}`);
+    report('4. Client-facing can_manage_recordings(p_meeting_id) and internal helper can_manage_recordings_for_user exist', resCanManage.rows.length >= 2);
+
+    // 5. Verify system_audit_logs immutability trigger
+    const resAuditTrig = await client.query(`
+      SELECT trg.tgname
+      FROM pg_trigger trg
+      JOIN pg_class tbl ON trg.tgrelid = tbl.oid
+      JOIN pg_namespace nsp ON tbl.relnamespace = nsp.oid
+      WHERE nsp.nspname = 'public'
+        AND tbl.relname = 'system_audit_logs'
+        AND trg.tgname = 'trg_prevent_system_audit_log_modification';
+    `);
+    report('5. Immutability trigger trg_prevent_system_audit_log_modification exists on system_audit_logs', resAuditTrig.rows.length === 1);
 
   } finally {
     await client.end().catch(() => undefined);

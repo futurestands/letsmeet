@@ -539,7 +539,7 @@ app.post('/api/recordings/start', async (req, res) => {
     if (!recording) return res.status(404).json({ error: 'Recording not found.' });
 
     // Multi-tenant authorization: Check if user is host or admin
-    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings_for_user', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
     if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings for this meeting.' });
 
     const { data: meeting } = await supabaseAdmin
@@ -668,7 +668,7 @@ app.post('/api/recordings/stop', async (req, res) => {
 
     if (recordingError || !recording) return res.status(404).json({ error: 'Recording not found.' });
 
-    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings_for_user', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
     if (!canManage) return res.status(403).json({ error: 'Unauthorized to manage recordings.' });
 
     if (recording.status === RECORDING_STATUS.COMPLETED) {
@@ -745,7 +745,7 @@ app.post('/api/recordings/playback-url', async (req, res) => {
       .eq('id', recording.meeting_id)
       .maybeSingle();
 
-    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
+    const { data: canManage } = await supabaseAdmin.rpc('can_manage_recordings_for_user', { p_meeting_id: recording.meeting_id, p_user_id: user.id });
 
     const accessDecision = evaluateRecordingAccess({
       isAuthenticated: true,
@@ -903,7 +903,7 @@ app.post('/api/recordings/reconcile', async (req, res) => {
 
     const meetingId = req.body?.meetingId;
     if (meetingId) {
-      const { data: canManage, error: rpcErr } = await supabaseAdmin.rpc('can_manage_recordings', { p_meeting_id: meetingId, p_user_id: user.id });
+      const { data: canManage, error: rpcErr } = await supabaseAdmin.rpc('can_manage_recordings_for_user', { p_meeting_id: meetingId, p_user_id: user.id });
       if (rpcErr || !canManage) return res.status(403).json({ error: 'Unauthorized to reconcile recordings for this meeting.' });
     } else {
       return res.status(403).json({ error: 'System reconciliation without meeting ID requires administrative privileges.' });

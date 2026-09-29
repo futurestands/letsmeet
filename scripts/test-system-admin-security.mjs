@@ -89,7 +89,19 @@ async function runSecurityAudit() {
 
     // F. Self-Promotion Attempt on platform_admins Table by Normal User
     const { error: errSelfPromote } = await normalClient.from('platform_admins').insert({ user_id: normalId, role: 'system_admin' });
-    report('F. Normal user self-promotion on platform_admins table denied by RLS', Boolean(errSelfPromote));
+    report('F1. Normal user self-promotion on platform_admins table denied by RLS', Boolean(errSelfPromote));
+
+    // F2. Information Disclosure Protection: Normal User SELECT from platform_admins
+    const { data: normalAdminsRead } = await normalClient.from('platform_admins').select('user_id');
+    report('F2. Normal user SELECT from platform_admins returned 0 rows (Information disclosure prevented)', !normalAdminsRead?.length);
+
+    // F3. Information Disclosure Protection: Org Owner SELECT from platform_admins
+    const { data: ownerAdminsRead } = await orgOwnerClient.from('platform_admins').select('user_id');
+    report('F3. Org Owner SELECT from platform_admins returned 0 rows (Information disclosure prevented)', !ownerAdminsRead?.length);
+
+    // F4. System Admin SELECT from platform_admins
+    const { data: sysAdminRead } = await sysAdminClient.from('platform_admins').select('user_id');
+    report('F4. System Admin SELECT from platform_admins allowed', Boolean(sysAdminRead?.length));
 
     // G. System Audit Logs Immutability Check
     const { data: auditRow } = await supabaseAdmin.from('system_audit_logs').insert({
