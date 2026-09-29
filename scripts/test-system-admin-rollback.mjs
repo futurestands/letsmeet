@@ -49,11 +49,11 @@ async function runRollbackAudit() {
   await pgClient.connect();
 
   try {
-    // 1. Establish initial target state before forced failure
+    // --- TEST 1: admin_suspend_user Rollback Proof ---
     const { data: beforeUser } = await supabaseAdmin.from('users').select('status').eq('id', targetUserId).single();
     report('1. Target user initial status is active', (beforeUser?.status || 'active') === 'active', `status=${beforeUser?.status}`);
 
-    // 2. Inject temporary staging-only failure trigger on system_audit_logs FOR INSERT
+    // Inject temporary staging-only failure trigger on system_audit_logs FOR INSERT
     await pgClient.query(`
       CREATE OR REPLACE FUNCTION public.force_audit_failure()
       RETURNS TRIGGER
@@ -76,7 +76,7 @@ async function runRollbackAudit() {
       EXECUTE FUNCTION public.force_audit_failure();
     `);
 
-    // 3. Execute admin_suspend_user RPC expecting forced audit failure inside transaction
+    // Execute admin_suspend_user RPC expecting forced audit failure inside transaction
     const { error: errSuspendRpc } = await sysAdminClient.rpc('admin_suspend_user', {
       p_target_user_id: targetUserId,
       p_suspend: true,
@@ -85,13 +85,48 @@ async function runRollbackAudit() {
 
     report('2. admin_suspend_user RPC failed as expected due to forced audit log failure', Boolean(errSuspendRpc) && String(errSuspendRpc?.message).includes('STAGING_FORCED_AUDIT_FAILURE'), errSuspendRpc?.message);
 
-    // 4. VERIFY TRANSACTION ROLLBACK: Target user status MUST STILL BE 'active' (NOT 'suspended')
+    // VERIFY TRANSACTION ROLLBACK: Target user status MUST STILL BE 'active' (NOT 'suspended')
     const { data: afterUser } = await supabaseAdmin.from('users').select('status').eq('id', targetUserId).single();
     report('3. EMPIRICAL PROOF: Target user status remained ACTIVE after failed RPC (User status update rolled back)', (afterUser?.status || 'active') === 'active', `status=${afterUser?.status}`);
 
-    // 5. VERIFY AUDIT LOG: No audit record created for failed operation
+    // VERIFY AUDIT LOG: No audit record created for failed operation
     const { data: auditRecords } = await supabaseAdmin.from('system_audit_logs').select('id').eq('target_id', targetUserId);
-    report('4. EMPIRICAL PROOF: No system_audit_logs record exists for failed operation', auditRecords?.length === 0, `count=${auditRecords?.length}`);
+    report('4. EMPIRICAL PROOF: No system_audit_logs record exists for failed user suspension', auditRecords?.length === 0, `count=${auditRecords?.length}`);
+
+    // --- TEST 2: admin_suspend_organization Rollback Proof ---
+    const { data: testOrg } = await supabaseAdmin.from('organizations').select('id, name, status').limit(1).single();
+    if (testOrg) {
+      const origOrgStatus = testOrg.status || 'active';
+
+      const { error: errOrgSuspendRpc } = await sysAdminClient.rpc('admin_suspend_organization', {
+        p_target_org_id: testOrg.id,
+        p_suspend: true,
+        p_reason: 'FORCED_FAILURE_TEST_ORG_SUSPEND',
+      });
+
+      report('5. admin_suspend_organization RPC failed as expected due to forced audit log failure', Boolean(errOrgSuspendRpc) && String(errOrgSuspendRpc?.message).includes('STAGING_FORCED_AUDIT_FAILURE'), errOrgSuspendRpc?.message);
+
+      const { data: afterOrg } = await supabaseAdmin.from('organizations').select('status').eq('id', testOrg.id).single();
+      report('6. EMPIRICAL PROOF: Organization status remained unchanged after failed RPC', (afterOrg?.status || 'active') === origOrgStatus, `status=${afterOrg?.status}`);
+    }
+
+    // --- TEST 3: admin_set_feature_flag Rollback Proof ---
+    const { data: testFlag } = await supabaseAdmin.from('feature_flags').select('key, enabled').eq('key', 'RECORDING').single();
+    if (testFlag) {
+      const origFlagEnabled = testFlag.enabled;
+      const targetEnabled = !origFlagEnabled;
+
+      const { error: errFlagRpc } = await sysAdminClient.rpc('admin_set_feature_flag', {
+        p_key: 'RECORDING',
+        p_enabled: targetEnabled,
+        p_reason: 'FORCED_FAILURE_TEST_FLAG_TOGGLE',
+      });
+
+      report('7. admin_set_feature_flag RPC failed as expected due to forced audit log failure', Boolean(errFlagRpc) && String(errFlagRpc?.message).includes('STAGING_FORCED_AUDIT_FAILURE'), errFlagRpc?.message);
+
+      const { data: afterFlag } = await supabaseAdmin.from('feature_flags').select('enabled').eq('key', 'RECORDING').single();
+      report('8. EMPIRICAL PROOF: Feature flag status remained unchanged after failed RPC', afterFlag?.enabled === origFlagEnabled, `enabled=${afterFlag?.enabled}`);
+    }
 
   } finally {
     // Cleanup temporary failure trigger
