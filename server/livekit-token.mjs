@@ -1004,7 +1004,7 @@ async function requireSystemAdmin(req, res) {
     return null;
   }
 
-  const { data: isSysAdmin, error: sysError } = await supabaseAdmin.rpc('is_system_admin', { p_user_id: user.id });
+  const { data: isSysAdmin, error: sysError } = await supabaseAdmin.rpc('is_system_admin_for_user', { p_user_id: user.id });
   if (sysError || !isSysAdmin) {
     res.status(403).json({ error: 'Unauthorized: System admin privileges required.' });
     return null;
