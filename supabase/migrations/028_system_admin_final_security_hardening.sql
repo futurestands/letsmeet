@@ -1,4 +1,4 @@
--- Migration 028: System Admin Final Security Hardening & Information Disclosure Remediation
+-- Migration 028: System Admin Security Hardening & Information Disclosure Remediation
 -- Additive and corrective.
 
 -- 1. Fix platform_admins Information Disclosure (Block SELECT for non-system-admins)
@@ -94,3 +94,124 @@ BEGIN
     ALTER FUNCTION public.rls_auto_enable() SET search_path = public;
   END IF;
 END $$;
+
+-- 5. Fix admin_suspend_user & admin_suspend_organization updated_at column reference
+CREATE OR REPLACE FUNCTION public.admin_suspend_user(
+  p_target_user_id UUID,
+  p_suspend BOOLEAN,
+  p_reason TEXT DEFAULT 'System Admin administrative action'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_admin_id UUID := auth.uid();
+  v_new_status TEXT;
+BEGIN
+  IF NOT public.is_system_admin() THEN
+    RAISE EXCEPTION 'Unauthorized: System admin privileges required';
+  END IF;
+
+  IF p_target_user_id = v_admin_id THEN
+    RAISE EXCEPTION 'System administrators cannot suspend their own account';
+  END IF;
+
+  v_new_status := CASE WHEN p_suspend THEN 'suspended' ELSE 'active' END;
+
+  UPDATE public.users
+  SET status = v_new_status
+  WHERE id = p_target_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Target user not found';
+  END IF;
+
+  -- Atomic Audit Logging inside same transaction
+  INSERT INTO public.system_audit_logs (
+    admin_user_id,
+    action,
+    target_type,
+    target_id,
+    reason,
+    created_at
+  ) VALUES (
+    v_admin_id,
+    CASE WHEN p_suspend THEN 'ADMIN_SUSPENDED_USER' ELSE 'ADMIN_REACTIVATED_USER' END,
+    'user',
+    p_target_user_id::TEXT,
+    p_reason,
+    NOW()
+  );
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'targetUserId', p_target_user_id,
+    'status', v_new_status
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.admin_suspend_user(UUID, BOOLEAN, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_suspend_user(UUID, BOOLEAN, TEXT) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.admin_suspend_organization(
+  p_target_org_id UUID,
+  p_suspend BOOLEAN,
+  p_reason TEXT DEFAULT 'System Admin administrative action'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_admin_id UUID := auth.uid();
+  v_new_status TEXT;
+BEGIN
+  IF NOT public.is_system_admin() THEN
+    RAISE EXCEPTION 'Unauthorized: System admin privileges required';
+  END IF;
+
+  v_new_status := CASE WHEN p_suspend THEN 'suspended' ELSE 'active' END;
+
+  UPDATE public.organizations
+  SET status = v_new_status
+  WHERE id = p_target_org_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Target organization not found';
+  END IF;
+
+  -- Atomic Audit Logging inside same transaction
+  INSERT INTO public.system_audit_logs (
+    admin_user_id,
+    action,
+    target_type,
+    target_id,
+    organization_id,
+    reason,
+    created_at
+  ) VALUES (
+    v_admin_id,
+    CASE WHEN p_suspend THEN 'ADMIN_SUSPENDED_ORGANIZATION' ELSE 'ADMIN_REACTIVATED_ORGANIZATION' END,
+    'organization',
+    p_target_org_id::TEXT,
+    p_target_org_id,
+    p_reason,
+    NOW()
+  );
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'targetOrgId', p_target_org_id,
+    'status', v_new_status
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.admin_suspend_organization(UUID, BOOLEAN, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_suspend_organization(UUID, BOOLEAN, TEXT) TO authenticated;

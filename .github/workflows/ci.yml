@@ -74,6 +74,7 @@ jobs:
             node scripts/test-recordings-http-endpoints.mjs
             node scripts/test-recordings-webhook-endpoint.mjs
             node scripts/test-system-admin-security.mjs
+            node scripts/test-system-admin-rollback.mjs
             node scripts/test-system-admin-console.mjs
           else
             echo "::error::Staging secrets are not configured for this protected branch; refusing to report green without runtime verification."
