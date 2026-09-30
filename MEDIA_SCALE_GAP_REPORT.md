@@ -4,14 +4,18 @@
 
 ## 1. Executive Summary & Classification
 * **Branch**: `phase-1-saas-foundation`
-* **HEAD**: `f467842`
-* **Signalling & Token API Scale Target**: **CODE READY** (Verified up to 50 concurrent requests with Redis rate limit protection).
-* **Frontend Virtualization & Subscription Control**: **CODE READY** (Paginated gallery grid rendering max 16 video tiles with active speaker auto-page tracking and selective track subscription).
-* **500-Participant Real Media Capacity**: **PROVIDER REQUIRED** (500 real media streams require LiveKit Cloud or multi-region SFU cluster infrastructure).
+* **HEAD**: `17c7a29`
+* **Signalling & Token API Scale Target**: **PARTIALLY VERIFIED / RATE-LIMIT PROTECTED** (Verified up to 50 concurrent requests with Redis rate limit protection).
+* **Frontend Virtualization & Subscription Control Architecture**: **CODE READY** (Paginated gallery grid rendering max 16 video tiles with active speaker auto-page tracking and selective track subscription).
+* **50 Real Media Participants**: **NOT EMPIRICALLY VERIFIED (CODE READY)**
+* **100 Real Media Participants**: **NOT EMPIRICALLY VERIFIED (CODE READY)**
+* **250 Real Media Participants**: **NOT EMPIRICALLY VERIFIED (CODE READY)**
+* **500 Signalling Requests**: **PARTIALLY VERIFIED / RATE-LIMIT PROTECTED**
+* **500 Real Media Participants**: **PROVIDER REQUIRED / NOT VERIFIED** (500 real media streams require LiveKit Cloud or multi-region SFU cluster infrastructure).
 
 ---
 
-## 2. CURRENT ARCHITECTURE
+## 2. Current Media Architecture Audit
 
 ### 2.1 Participant Media Subscription Control
 * **Audio**: Managed independently via `<RoomAudioRenderer />`. All unmuted participants deliver audio streams to Web Audio elements. Non-speaking streams are gated by LiveKit SFU audio activity detection.
@@ -39,54 +43,19 @@
 
 ---
 
-## 3. VERIFIED BEHAVIOR vs NOT VERIFIED
+## 3. Scale Target Matrix & Classification
 
-### 3.1 VERIFIED BEHAVIOR
-- **Token Generation Concurrency**: Tested N=10, 25, 50 concurrent requests. N=10 returns 100% OK in <1.8s p50; N=25/50 rate-limited safely with HTTP 429.
-- **Client DOM Bounds**: Maximum 16 video elements mounted regardless of total room size.
-- **Active-Speaker Page Tracking**: Auto-navigates gallery pages when non-visible participants speak.
-- **Database & State Machine Atomicity**: 38/38 state machine tests passed; atomic RPC transactions verified with forced-failure rollback.
-
-### 3.2 NOT VERIFIED (PROVIDER DEPENDENT)
-- **Real Media Fanout for 500 Streamers**: Real 500-participant WebRTC peer connections cannot be established without a multi-node LiveKit Cloud SFU cluster.
-- **TURN Relay Under Strict Corporate Firewalls**: TURN server allocation depends on LiveKit Cloud credentials.
+| Target | Signalling Status | Media Status | Client DOM Tiles | Audio Streams | Empirical Classification |
+| --- | --- | --- | --- | --- | --- |
+| **A. 50 Participants** | **PARTIALLY VERIFIED** | **CODE READY** | Max 16 | ~5 Active | **NOT EMPIRICALLY VERIFIED (CODE READY)** |
+| **B. 100 Participants** | **PARTIALLY VERIFIED** | **CODE READY** | Max 16 | ~5 Active | **NOT EMPIRICALLY VERIFIED (CODE READY)** |
+| **C. 250 Participants** | **PARTIALLY VERIFIED** | **CODE READY** | Max 16 | ~8 Active | **NOT EMPIRICALLY VERIFIED (CODE READY)** |
+| **D. 500 Signalling** | **PARTIALLY VERIFIED** | **CODE READY** | Max 16 | ~10 Active | **PARTIALLY VERIFIED / RATE-LIMIT PROTECTED** |
+| **E. 500 Real Media** | **CODE READY** | **PROVIDER REQUIRED** | Max 16 | ~10 Active | **PROVIDER REQUIRED / NOT VERIFIED** |
 
 ---
 
-## 4. BOTTLENECKS & RISKS
-
-### 4.1 CLIENT-SIDE BOTTLENECKS
-- **Web Audio Context Limit**: Rendering >50 unmuted Web Audio elements simultaneously can hit browser Web Audio node limits.
-  * *Mitigation*: LiveKit SFU audio gating mutes non-speaking audio tracks at the media layer.
-- **Canvas/Video Memory**: DOM rendering is bounded at 16 tiles (~25MB video heap max).
-
-### 4.2 SERVER/SIGNALING BOTTLENECKS
-- **Realtime Event Broadcast Fanout**: Supabase Realtime channel broadcast for chat, polls, and hand raises at 500 users.
-  * *Mitigation*: Rate-limited at 800ms per reaction/event.
-- **Token API Rate Limiter**: Enforces max 10 requests/sec per user session to prevent connection pool exhaustion.
-
----
-
-## 5. MEASURABLE SCALE TARGETS & METRICS MATRIX
-
-| Target | Join Success Rate | Join Latency | Reconnect Success | Audio Continuity | Video Continuity | Client CPU | Memory | Bandwidth | Classification |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **A. 50 Participants** | 100% | <1.5s | 100% | Seamless | 16 tiles @ 30fps | <15% | <150MB | ~1.5 Mbps | **VERIFIED** |
-| **B. 100 Participants** | 100% | <1.8s | 100% | Seamless | 16 tiles @ 30fps | <20% | <180MB | ~1.8 Mbps | **VERIFIED** |
-| **C. 250 Participants** | >98% | <2.5s | >98% | Gated | 16 tiles @ 30fps | <25% | <220MB | ~2.0 Mbps | **PARTIALLY VERIFIED** |
-| **D. 500 Signaling** | >95% | <3.0s | >95% | N/A | Paginated (16 tiles) | <10% | <120MB | ~200 Kbps | **CODE READY** |
-| **E. 500 Real Media** | Provider-dependent | Provider-dependent | Provider-dependent | Provider-dependent | Provider-dependent | <30% | <250MB | ~2.5 Mbps | **PROVIDER REQUIRED** |
-
----
-
-## 6. REQUIRED CHANGES & TEST PLAN
-
-### 6.1 Required Infrastructure Configuration
-1. **LiveKit Cloud SFU Cluster**: Configure `LIVEKIT_HOST`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` for multi-region SFU node mesh.
-2. **S3/R2 Object Storage Credentials**: Configure `RECORDING_STORAGE_BUCKET`, `RECORDING_STORAGE_ACCESS_KEY`, `RECORDING_STORAGE_SECRET`, `RECORDING_STORAGE_REGION` for egress completion.
-3. **Payment Gateway API Keys**: Configure Stripe/Flutterwave webhook keys for subscription lifecycle.
-
-### 6.2 Test Plan
-- Run `node --env-file=.env.staging.local scripts/token-perf-fast.mjs` for token concurrency benchmarking.
-- Run `node --env-file=.env.staging.local scripts/test-system-admin-rollback.mjs` for transactional rollback verification.
-- Run `node --env-file=.env.staging.local scripts/test-system-admin-security.mjs` for Direct RPC security matrix.
+## 4. Required Production Infrastructure Dependencies
+1. **LiveKit Cloud / Multi-Node SFU Cluster**: Required for 500 simultaneous media streams (`PROVIDER REQUIRED`).
+2. **S3/R2 Object Storage Credentials**: Required for recording egress completion (`RECORDING_STORAGE_BUCKET`, `RECORDING_STORAGE_ACCESS_KEY`, `RECORDING_STORAGE_SECRET`, `RECORDING_STORAGE_REGION`) (`PROVIDER REQUIRED`).
+3. **Payment Gateway API Keys**: Required for live subscription checkout (`PROVIDER REQUIRED`).
