@@ -1,0 +1,32 @@
+{
+  "tier": 25,
+  "classification": "ENVIRONMENT FAILURE",
+  "limitingResource": "Playwright Chromium browser binaries missing (requires \"npx playwright install chromium\"). Details: browserType.launch: Executable doesn't exist at C:\\Users\\MJ\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1187\\chrome-win\\headless_shell.exe",
+  "participants": {
+    "target": 25,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": "NOT AVAILABLE",
+    "p95": "NOT AVAILABLE",
+    "max": "NOT AVAILABLE"
+  },
+  "webrtc": {
+    "packetLoss": "NOT AVAILABLE",
+    "rtt": "NOT AVAILABLE",
+    "bitrateKbps": "NOT AVAILABLE",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": [
+    {
+      "error": "Playwright Chromium browser binaries missing (requires \"npx playwright install chromium\"). Details: browserType.launch: Executable doesn't exist at C:\\Users\\MJ\\AppData\\Local\\ms-playwright\\chromium_headless_shell-1187\\chrome-win\\headless_shell.exe"
+    }
+  ]
+}
