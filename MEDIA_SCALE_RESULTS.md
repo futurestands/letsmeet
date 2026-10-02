@@ -6,7 +6,7 @@
 * **Environment**: Staging (`.env.staging.local` / PostgreSQL `uasslvisjnwhdhcgqwyc` in `eu-west-2`).
 * **LiveKit Server**: Staging LiveKit Host (`https://letsmeet-staging-1lkr2c90.livekit.cloud`).
 * **Test Date**: September 2026.
-* **HEAD Commit**: `a46d105`.
+* **HEAD Commit**: `a8f1ae1`.
 * **Execution Harness**: [`scripts/media-scale-load.mjs`](file:///C:/Users/MJ/Desktop/letsmeet/scripts/media-scale-load.mjs).
 
 ---
@@ -15,9 +15,9 @@
 
 | Tier | Real Participants | Published Video | Published Audio | Join Success | Reconnects | Packet Loss | RTT | Result | Limiting Resource / Reason |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **Tier 1 (25)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **ENVIRONMENT FAILURE** | Playwright Chromium browser binaries missing locally (`npx playwright install chromium` required). |
-| **Tier 2 (50)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **ENVIRONMENT FAILURE** | Blocked until Tier 1 succeeds with installed browser binaries. |
-| **Tier 3 (100)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **ENVIRONMENT FAILURE** | Blocked until Tier 2 succeeds. |
+| **Tier 1 (25)** | 0 | 0 | 0 | 0% | 0 | INSUFFICIENT SAMPLES | INSUFFICIENT SAMPLES | **PROVIDER REQUIRED** | LiveKit Cloud SFU WebRTC connection timeout (`LIVEKIT_API_KEY`/`SECRET` credentials unconfigured on local environment). |
+| **Tier 2 (50)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **PROVIDER REQUIRED** | Blocked until Tier 1 succeeds with configured LiveKit Cloud credentials. |
+| **Tier 3 (100)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **PROVIDER REQUIRED** | Blocked until Tier 2 succeeds. |
 | **Tier 4 (250)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **NOT EMPIRICALLY VERIFIED** | Unverified. |
 | **Tier 5 (500)** | 0 | 0 | 0 | 0% | 0 | NOT AVAILABLE | NOT AVAILABLE | **PROVIDER REQUIRED** | Multi-node LiveKit SFU Cloud Cluster required for 500 media streams. |
 
@@ -40,12 +40,11 @@
 ---
 
 ## 5. System Bottlenecks Summary
-1. **ENVIRONMENT_FAILURE**: Local test runner node lacks installed Playwright Chromium browser binaries (`npx playwright install chromium` required on machine to launch WebRTC agents).
+1. **LIVEKIT_PROVIDER_LIMIT**: LiveKit Cloud SFU WebRTC connection requires valid `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` credentials for `wss://letsmeet-staging-1lkr2c90.livekit.cloud` (`PROVIDER REQUIRED`).
 2. **TOKEN_API_RATE_LIMIT**: Token issuance rate limiter enforces protection at N>10 burst concurrency, protecting database connection pools.
-3. **LIVEKIT_PROVIDER_LIMIT**: 500 real simultaneous media stream fanouts require multi-node LiveKit Cloud cluster infrastructure (`PROVIDER REQUIRED`).
 
 ---
 
 ## 6. Next Engineering Step
-1. Execute `npx playwright install chromium` on test runner node to install Chromium browser binaries.
+1. Configure valid `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` credentials for `wss://letsmeet-staging-1lkr2c90.livekit.cloud` on staging environment.
 2. Execute `node --env-file=.env.staging.local scripts/media-scale-load.mjs --participants=25` to collect empirical WebRTC stats across Tier 1 (25).

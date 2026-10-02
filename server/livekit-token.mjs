@@ -317,6 +317,7 @@ app.get('/api/livekit/token', async (req, res) => {
         room,
         userId: user.id,
         status: decision.status,
+        reason: decision.error,
         durationMs: Date.now() - started,
         ...timing,
       });

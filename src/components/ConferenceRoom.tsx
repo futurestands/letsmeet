@@ -137,6 +137,12 @@ function ConferenceExperience({
   const isHost = meeting.host_id === user.id;
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __LIVEKIT_ROOM__?: Room }).__LIVEKIT_ROOM__ = room;
+    }
+  }, [room]);
+
+  useEffect(() => {
     const updateCount = () => {
       setParticipantCount(room.numParticipants + 1);
     };

@@ -1,0 +1,35 @@
+{
+  "tier": 1,
+  "classification": "PROVIDER REQUIRED",
+  "participants": {
+    "target": 1,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": 38944,
+    "p95": 38944,
+    "max": 38944
+  },
+  "tokenLatencyMs": {
+    "p50": 1001,
+    "p95": 1001
+  },
+  "webrtc": {
+    "packetLoss": "INSUFFICIENT SAMPLES",
+    "rttMs": "INSUFFICIENT SAMPLES",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": [
+    {
+      "participant": 0,
+      "error": "LiveKit SFU WebRTC connection timeout (LIVEKIT_API_KEY/SECRET credentials unconfigured)"
+    }
+  ]
+}

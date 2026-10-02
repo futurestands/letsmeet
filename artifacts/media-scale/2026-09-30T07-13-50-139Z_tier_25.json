@@ -1,0 +1,131 @@
+{
+  "tier": 25,
+  "classification": "NOT EMPIRICALLY VERIFIED",
+  "participants": {
+    "target": 25,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": "NOT AVAILABLE",
+    "p95": "NOT AVAILABLE",
+    "max": "NOT AVAILABLE"
+  },
+  "tokenLatencyMs": {
+    "p50": 611,
+    "p95": 1591
+  },
+  "webrtc": {
+    "packetLoss": "INSUFFICIENT SAMPLES",
+    "rttMs": "INSUFFICIENT SAMPLES",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": [
+    {
+      "participant": 0,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 1,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 2,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 3,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 4,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 5,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 6,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 7,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 8,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 9,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 10,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 11,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 12,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 13,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 14,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 15,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 16,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 17,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 18,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 19,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 20,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 21,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 22,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 23,
+      "error": "Token API returned HTTP 403"
+    },
+    {
+      "participant": 24,
+      "error": "Token API returned HTTP 403"
+    }
+  ]
+}

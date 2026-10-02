@@ -1,0 +1,35 @@
+{
+  "tier": 1,
+  "classification": "NOT EMPIRICALLY VERIFIED",
+  "participants": {
+    "target": 1,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": "NOT AVAILABLE",
+    "p95": "NOT AVAILABLE",
+    "max": "NOT AVAILABLE"
+  },
+  "tokenLatencyMs": {
+    "p50": 1052,
+    "p95": 1052
+  },
+  "webrtc": {
+    "packetLoss": "INSUFFICIENT SAMPLES",
+    "rttMs": "INSUFFICIENT SAMPLES",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": [
+    {
+      "participant": 0,
+      "error": "Token API returned HTTP 403: {\"error\":\"You do not have access to this meeting.\"}"
+    }
+  ]
+}

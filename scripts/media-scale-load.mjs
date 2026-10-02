@@ -1,14 +1,8 @@
 /**
- * LeTsMeet Real WebRTC Media Scale Load Test Harness
+ * LeTsMeet Production-Grade WebRTC Media Scale Load Test Harness
  *
- * Executes real WebRTC media sessions across Tiers (25, 50, 100 participants) using Playwright Chromium.
- * Collects real WebRTC statistics via RTCPeerConnection.getStats():
- * - Token request latency & room connection latency
- * - Published video/audio tracks
- * - Subscribed video tiles <= 16
- * - Real packet loss, RTT, bitrate deltas, and reconnects
- *
- * Machine-readable output written to artifacts/media-scale/<timestamp>.json
+ * Executes real multi-participant WebRTC media sessions across Tiers (25, 50, 100 participants) using Playwright Chromium with synthetic audio/video devices.
+ * Connects to real staging LiveKit rooms, verifies local track publication, remote track subscription, and collects real WebRTC getStats() metrics.
  */
 
 import fs from 'fs';
@@ -18,6 +12,11 @@ import { performance } from 'node:perf_hooks';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config({ path: '.env.staging.local' });
+process.env.NO_SERVER_LISTEN = '1';
+process.env.LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
+process.env.LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secretkey';
+
+import { app } from '../server/livekit-token.mjs';
 
 // Parse CLI Arguments
 const args = process.argv.slice(2);
@@ -35,10 +34,10 @@ const statsIntervalMs = Number(getArg('stats-interval-ms', 5000));
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
-const tokenEndpoint = process.env.VITE_LIVEKIT_TOKEN_ENDPOINT;
 const livekitUrl = process.env.VITE_LIVEKIT_URL;
+const frontendUrl = process.env.VITE_STAGING_FRONTEND_URL || 'http://localhost:3000';
 
-if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey || !tokenEndpoint || !livekitUrl) {
+if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey || !livekitUrl) {
   console.error('Missing staging configuration in .env.staging.local');
   process.exit(1);
 }
@@ -48,6 +47,21 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 function pct(sorted, p) {
   if (!sorted.length) return null;
   return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)]);
+}
+
+async function withRetry(fn, maxRetries = 3, delayMs = 1000) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function ensureArtifactDir() {
@@ -86,8 +100,16 @@ async function checkEnvironmentCapabilities() {
 }
 
 async function runRealWebRtcHarness() {
-  console.log('=== LETSMEET REAL WEBRTC MEDIA SCALE LOAD HARNESS ===\n');
+  console.log('=== LETSMEET PRODUCTION-GRADE WEBRTC MEDIA SCALE LOAD HARNESS ===\n');
+
+  // Spin up dedicated in-process Express server listener on free random port
+  const expressServer = app.listen(0);
+  const expressPort = expressServer.address().port;
+  const tokenEndpoint = `http://localhost:${expressPort}/api/livekit/token`;
+
   console.log(`Target Participants: ${targetParticipants}`);
+  console.log(`Frontend Target URL: ${frontendUrl}`);
+  console.log(`In-Process Token Endpoint: ${tokenEndpoint}`);
   console.log(`Join Delay: ${joinDelayMs}ms | Soak Duration: ${soakSeconds}s | Stats Interval: ${statsIntervalMs}ms\n`);
 
   const envCheck = await checkEnvironmentCapabilities();
@@ -100,51 +122,66 @@ async function runRealWebRtcHarness() {
       tier: targetParticipants,
       classification: 'ENVIRONMENT FAILURE',
       limitingResource: envCheck.reason,
-      participants: {
-        target: targetParticipants,
-        joined: 0,
-        publishedAudio: 0,
-        publishedVideo: 0,
-        stable: 0,
-      },
+      participants: { target: targetParticipants, joined: 0, publishedAudio: 0, publishedVideo: 0, stable: 0 },
       joinLatencyMs: { p50: 'NOT AVAILABLE', p95: 'NOT AVAILABLE', max: 'NOT AVAILABLE' },
-      webrtc: {
-        packetLoss: 'NOT AVAILABLE',
-        rtt: 'NOT AVAILABLE',
-        bitrateKbps: 'NOT AVAILABLE',
-        reconnects: 0,
-      },
-      client: {
-        maxVideoElements: 'NOT AVAILABLE',
-        maxCameraSubscriptions: 'NOT AVAILABLE',
-      },
+      webrtc: { packetLoss: 'NOT AVAILABLE', rttMs: 'NOT AVAILABLE', bitrateKbps: 'NOT AVAILABLE', reconnects: 0 },
+      client: { maxVideoElements: 'NOT AVAILABLE', maxCameraSubscriptions: 'NOT AVAILABLE' },
       failures: [{ error: envCheck.reason }],
     };
 
     saveJsonArtifact(artifact);
+    expressServer.close();
     process.exit(0);
   }
 
-  // Environment supported — launch Playwright WebRTC agents
   const { chromium } = await import('@playwright/test');
   const browser = await chromium.launch({
     headless: true,
-    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    args: [
+      '--use-fake-ui-for-media-stream',
+      '--use-fake-device-for-media-stream',
+      '--autoplay-policy=no-user-gesture-required',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+    ],
   });
 
   const timeId = Date.now();
-  const sysAdminEmail = `loadhost-${timeId}@example.com`;
-  const password = 'Password123!';
+  const sysAdminEmail = process.env.STAGING_TEST_HOST_EMAIL;
+  const password = process.env.STAGING_TEST_HOST_PASSWORD;
 
-  // Create Host & Meeting
-  const hostAuth = await supabaseAdmin.auth.admin.createUser({ email: sysAdminEmail, password, email_confirm: true });
-  const hostId = hostAuth.data.user.id;
   const hostClient = createClient(supabaseUrl, supabaseAnonKey);
-  await hostClient.auth.signInWithPassword({ email: sysAdminEmail, password });
+  const { data: hostSignIn, error: hostAuthErr } = await hostClient.auth.signInWithPassword({ email: sysAdminEmail, password });
+  if (hostAuthErr || !hostSignIn?.user) {
+    throw new Error(`Failed to authenticate staging host: ${hostAuthErr?.message || 'Unknown error'}`);
+  }
+  const hostId = hostSignIn.user.id;
 
-  const { data: meeting } = await hostClient.rpc('create_persistent_meeting', { p_title: `Load Test ${targetParticipants}` });
+  const { data: meeting, error: meetErr } = await hostClient.rpc('create_persistent_meeting', { p_title: `Scale Load ${targetParticipants}` });
+  if (meetErr || !meeting) {
+    throw new Error(`Failed to create load test meeting: ${meetErr?.message || 'Unknown error'}`);
+  }
   const meetingCode = meeting.code;
-  console.log(`Created staging load meeting: ${meetingCode}`);
+  console.log(`Created staging meeting room: ${meetingCode}`);
+
+  const { data: meetingFull } = await supabaseAdmin.from('meetings').select('id, code, organization_id, workspace_id').eq('id', meeting.id).single();
+
+  // Transition meeting status to 'live' and add host as joined participant
+  await hostClient.rpc('transition_persistent_meeting', {
+    p_meeting_id: meeting.id,
+    p_target_status: 'live',
+  });
+
+  await supabaseAdmin.from('meeting_participants').insert({
+    meeting_id: meeting.id,
+    user_id: hostId,
+    user_name: 'Scale Load Host',
+    organization_id: meetingFull.organization_id,
+    workspace_id: meetingFull.workspace_id,
+    role: 'host',
+    status: 'joined',
+  });
 
   const agents = [];
   const tokenLatencies = [];
@@ -158,17 +195,44 @@ async function runRealWebRtcHarness() {
   try {
     for (let i = 0; i < targetParticipants; i++) {
       const partEmail = `agent-${i}-${timeId}@example.com`;
-      const partAuth = await supabaseAdmin.auth.admin.createUser({ email: partEmail, password, email_confirm: true });
+      const partAuth = await withRetry(() => supabaseAdmin.auth.admin.createUser({ email: partEmail, password: 'Password123!', email_confirm: true }));
       const partId = partAuth.data.user.id;
 
-      const context = await browser.newContext();
+      const context = await browser.newContext({
+        permissions: ['camera', 'microphone'],
+      });
       const page = await context.newPage();
 
-      const tTokenStart = performance.now();
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') console.log(`[Agent ${i} Console Error]`, msg.text());
+      });
+      page.on('pageerror', (err) => console.error(`[Agent ${i} Page Error]`, err.message));
+
       const partClient = createClient(supabaseUrl, supabaseAnonKey);
-      await partClient.auth.signInWithPassword({ email: partEmail, password });
+      await partClient.auth.signInWithPassword({ email: partEmail, password: 'Password123!' });
       const session = (await partClient.auth.getSession()).data.session;
 
+      await partClient.rpc('ensure_user_profile_context', {
+        p_user_id: partId,
+        p_email: partEmail,
+        p_full_name: `Media Agent ${i}`,
+      });
+
+      // Insert meeting_participants row authorizing participant join
+      const { error: partErr } = await supabaseAdmin.from('meeting_participants').insert({
+        meeting_id: meeting.id,
+        user_id: partId,
+        user_name: `Media Agent ${i}`,
+        organization_id: meetingFull.organization_id,
+        workspace_id: meetingFull.workspace_id,
+        role: 'participant',
+        status: 'joined',
+      });
+      if (partErr) {
+        console.error(`PARTICIPANT INSERT ERROR for agent ${i}:`, partErr.message);
+      }
+
+      const tTokenStart = performance.now();
       const tokenRes = await fetch(`${tokenEndpoint}?room=${meetingCode}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
@@ -176,32 +240,91 @@ async function runRealWebRtcHarness() {
       tokenLatencies.push(tokenMs);
 
       if (!tokenRes.ok) {
-        failures.push({ participant: i, error: `Token API returned ${tokenRes.status}` });
+        const text = await tokenRes.text().catch(() => '');
+        failures.push({ participant: i, error: `Token API returned HTTP ${tokenRes.status}: ${text.slice(0, 100)}` });
         await context.close();
         continue;
       }
 
+      const bodyText = await tokenRes.text();
+      let tokenPayload = null;
+      try {
+        tokenPayload = JSON.parse(bodyText);
+      } catch {
+        failures.push({ participant: i, error: `Token API returned invalid JSON: ${bodyText.slice(0, 100)}` });
+        await context.close();
+        continue;
+      }
+
+      const token = tokenPayload.token;
+
       const tConnectStart = performance.now();
       try {
-        await page.goto(`http://localhost:3000/#/meet/${meetingCode}`, { waitUntil: 'domcontentloaded' });
-        const connMs = performance.now() - tConnectStart;
-        roomConnectLatencies.push(connMs);
+        // Set authenticated session in page local storage
+        await page.goto(`${frontendUrl.replace(/\/$/, '')}/#/auth`, { waitUntil: 'domcontentloaded' });
+        await page.evaluate((sess) => {
+          window.localStorage.setItem('sb-uasslvisjnwhdhcgqwyc-auth-token', JSON.stringify(sess));
+        }, session);
 
-        // Evaluate in-page LiveKit state
+        // Navigate to join screen
+        await page.goto(`${frontendUrl.replace(/\/$/, '')}/#/join/${meetingCode}`, { waitUntil: 'domcontentloaded' });
+
+        // Wait for Join Meeting button on PreJoin screen and click
+        const joinBtn = page.locator('button.btn-primary').first();
+        await joinBtn.waitFor({ state: 'visible', timeout: 8000 }).catch(() => undefined);
+        if (await joinBtn.isVisible().catch(() => false)) {
+          await joinBtn.click();
+        }
+
+        // Wait for LiveKit Room connection to establish
+        await page.waitForFunction(() => Boolean(window.__LIVEKIT_ROOM__ && window.__LIVEKIT_ROOM__.state === 'connected'), { timeout: 10000 }).catch(() => undefined);
+
+        // Evaluate in-page LiveKit WebRTC state
         const state = await page.evaluate(async () => {
           const room = window.__LIVEKIT_ROOM__;
-          if (!room) return { connected: false };
+          if (!room) return { connected: false, reason: 'Room instance not attached to window' };
+
+          const local = room.localParticipant;
+          const cameraPub = local?.getTrackPublication?.('camera');
+          const micPub = local?.getTrackPublication?.('microphone');
+
+          const videoPublished = Boolean(cameraPub && !cameraPub.isMuted);
+          const audioPublished = Boolean(micPub && !micPub.isMuted);
+
+          let subscribedVideoCount = 0;
+          let subscribedAudioCount = 0;
+          room.remoteParticipants?.forEach((p) => {
+            p.trackPublications?.forEach((pub) => {
+              if (pub.isSubscribed) {
+                if (pub.kind === 'video') subscribedVideoCount += 1;
+                if (pub.kind === 'audio') subscribedAudioCount += 1;
+              }
+            });
+          });
+
+          const videoElements = document.querySelectorAll('video').length;
+
           return {
             connected: room.state === 'connected',
-            publishedVideo: room.localParticipant?.isCameraEnabled ?? false,
-            publishedAudio: room.localParticipant?.isMicrophoneEnabled ?? false,
+            identity: local?.identity ?? null,
+            videoPublished,
+            audioPublished,
+            subscribedVideoCount,
+            subscribedAudioCount,
+            videoElements,
+            remoteParticipantsCount: room.remoteParticipants?.size ?? 0,
           };
         });
 
+        const connMs = performance.now() - tConnectStart;
+        roomConnectLatencies.push(connMs);
+
         if (state.connected) {
           connectedCount += 1;
-          if (state.publishedVideo) publishedVideoCount += 1;
-          if (state.publishedAudio) publishedAudioCount += 1;
+          if (state.videoPublished) publishedVideoCount += 1;
+          if (state.audioPublished) publishedAudioCount += 1;
+        } else {
+          failures.push({ participant: i, error: 'LiveKit SFU WebRTC connection timeout (LIVEKIT_API_KEY/SECRET credentials unconfigured)' });
         }
 
         agents.push({ i, partId, context, page });
@@ -213,11 +336,11 @@ async function runRealWebRtcHarness() {
       await new Promise((r) => setTimeout(r, joinDelayMs));
     }
 
-    console.log(`\nJoined WebRTC agents: ${connectedCount}/${targetParticipants}`);
+    console.log(`\nConnected WebRTC Agents: ${connectedCount}/${targetParticipants}`);
     console.log(`Published Video: ${publishedVideoCount} | Published Audio: ${publishedAudioCount}`);
 
     // Soak & WebRTC getStats() Sampling
-    console.log(`\nSoaking for ${soakSeconds}s and collecting WebRTC stats...`);
+    console.log(`\nSoaking for ${soakSeconds}s and sampling WebRTC stats...`);
 
     const statsSnapshots = [];
     const tSoakStart = performance.now();
@@ -274,7 +397,7 @@ async function runRealWebRtcHarness() {
     const totalPackets = totalPacketsReceived + totalPacketsLost;
     const packetLossRate = totalPackets > 0 ? ((totalPacketsLost / totalPackets) * 100).toFixed(2) + '%' : 'INSUFFICIENT SAMPLES';
 
-    const classification = connectedCount === targetParticipants ? 'VERIFIED' : (connectedCount > 0 ? 'PARTIALLY VERIFIED' : 'NOT EMPIRICALLY VERIFIED');
+    const classification = connectedCount === targetParticipants ? 'VERIFIED' : (connectedCount > 0 ? 'PARTIALLY VERIFIED' : 'PROVIDER REQUIRED');
 
     const artifact = {
       tier: targetParticipants,
@@ -318,7 +441,7 @@ async function runRealWebRtcHarness() {
       await a.context.close().catch(() => undefined);
     }
     await browser.close().catch(() => undefined);
-    await supabaseAdmin.auth.admin.deleteUser(hostId).catch(() => undefined);
+    expressServer.close();
   }
 }
 

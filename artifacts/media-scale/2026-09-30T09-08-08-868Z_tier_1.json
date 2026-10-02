@@ -1,0 +1,30 @@
+{
+  "tier": 1,
+  "classification": "NOT EMPIRICALLY VERIFIED",
+  "participants": {
+    "target": 1,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": 39364,
+    "p95": 39364,
+    "max": 39364
+  },
+  "tokenLatencyMs": {
+    "p50": 1220,
+    "p95": 1220
+  },
+  "webrtc": {
+    "packetLoss": "INSUFFICIENT SAMPLES",
+    "rttMs": "INSUFFICIENT SAMPLES",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": []
+}

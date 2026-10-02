@@ -104,7 +104,7 @@ async function run() {
     console.log('\n--- 3. Timezone Conversion (Africa/Nairobi) ---');
     const { data: nairobiMeeting, error: nairobiErr } = await hostClient.rpc('schedule_persistent_meeting', {
       p_title: 'Nairobi Meeting',
-      p_date: '2026-10-01',
+      p_date: '2026-10-15',
       p_time: '14:00',
       p_timezone: 'Africa/Nairobi',
     });
@@ -112,7 +112,7 @@ async function run() {
 
     const { data: nairobiRow } = await supabaseAdmin.from('meetings').select('scheduled_for').eq('code', nairobiMeeting.meeting_code).single();
     // 14:00 EAT (UTC+3) is 11:00 UTC
-    const isExactUtc = nairobiRow?.scheduled_for?.startsWith('2026-10-01T11:00:00');
+    const isExactUtc = nairobiRow?.scheduled_for?.startsWith('2026-10-15T11:00:00');
     report('Africa/Nairobi 14:00 wall time converted to 11:00 UTC', Boolean(isExactUtc), `scheduled_for=${nairobiRow?.scheduled_for}`);
 
     // 4. Near-Now Scheduling
