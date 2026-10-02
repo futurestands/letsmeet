@@ -13,10 +13,9 @@ import { createClient } from '@supabase/supabase-js';
 
 dotenv.config({ path: '.env.staging.local' });
 process.env.NO_SERVER_LISTEN = '1';
-process.env.LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY || 'devkey';
-process.env.LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || 'secretkey';
 
-import { app } from '../server/livekit-token.mjs';
+// Dynamic import after NO_SERVER_LISTEN is set
+const { app } = await import('../server/livekit-token.mjs');
 
 // Parse CLI Arguments
 const args = process.argv.slice(2);

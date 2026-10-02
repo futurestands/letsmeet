@@ -12,7 +12,8 @@ import { createClient } from '@supabase/supabase-js';
 dotenv.config({ path: '.env.staging.local' });
 process.env.NO_SERVER_LISTEN = '1';
 
-import { app } from '../server/livekit-token.mjs';
+// Dynamic import after NO_SERVER_LISTEN is set
+const { app } = await import('../server/livekit-token.mjs');
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

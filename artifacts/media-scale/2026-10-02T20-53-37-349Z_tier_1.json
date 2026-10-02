@@ -1,0 +1,35 @@
+{
+  "tier": 1,
+  "classification": "PROVIDER REQUIRED",
+  "participants": {
+    "target": 1,
+    "joined": 0,
+    "publishedAudio": 0,
+    "publishedVideo": 0,
+    "stable": 0
+  },
+  "joinLatencyMs": {
+    "p50": "NOT AVAILABLE",
+    "p95": "NOT AVAILABLE",
+    "max": "NOT AVAILABLE"
+  },
+  "tokenLatencyMs": {
+    "p50": 36,
+    "p95": 36
+  },
+  "webrtc": {
+    "packetLoss": "INSUFFICIENT SAMPLES",
+    "rttMs": "INSUFFICIENT SAMPLES",
+    "reconnects": 0
+  },
+  "client": {
+    "maxVideoElements": "NOT AVAILABLE",
+    "maxCameraSubscriptions": "NOT AVAILABLE"
+  },
+  "failures": [
+    {
+      "participant": 0,
+      "error": "Token API returned HTTP 500: {\"error\":\"LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be configured.\"}"
+    }
+  ]
+}
