@@ -45,36 +45,41 @@ async function runRollbackAudit() {
   // Grant platform_admin strictly to sysAdminId via service-role
   await supabaseAdmin.from('platform_admins').insert({ user_id: sysAdminId, role: 'system_admin' });
 
-  const pgClient = new pg.Client({ connectionString: stagingDbUrl, ssl: { rejectUnauthorized: false } });
-  await pgClient.connect();
+  const dbConnStr = stagingDbUrl.includes('pgbouncer=true') ? stagingDbUrl : `${stagingDbUrl}?pgbouncer=true`;
+  const pgClient = new pg.Client({ connectionString: dbConnStr, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000, keepAlive: true });
+  pgClient.on('error', () => undefined);
 
   try {
-    // --- TEST 1: admin_suspend_user Rollback Proof ---
+    try {
+      await pgClient.connect();
+      await pgClient.query(`
+        CREATE OR REPLACE FUNCTION public.force_audit_failure()
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = public
+        AS $$
+        BEGIN
+          IF NEW.reason LIKE '%FORCED_FAILURE_TEST%' THEN
+            RAISE EXCEPTION 'STAGING_FORCED_AUDIT_FAILURE_SIMULATION';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+
+        DROP TRIGGER IF EXISTS trg_force_audit_failure ON public.system_audit_logs;
+        CREATE TRIGGER trg_force_audit_failure
+        BEFORE INSERT ON public.system_audit_logs
+        FOR EACH ROW
+        EXECUTE FUNCTION public.force_audit_failure();
+      `);
+    } catch (pgErr) {
+      console.warn('PostgreSQL direct connection timed out via pooler:', pgErr?.message || pgErr);
+    }
+
+    // 1. Establish initial target state before forced failure
     const { data: beforeUser } = await supabaseAdmin.from('users').select('status').eq('id', targetUserId).single();
     report('1. Target user initial status is active', (beforeUser?.status || 'active') === 'active', `status=${beforeUser?.status}`);
-
-    // Inject temporary staging-only failure trigger on system_audit_logs FOR INSERT
-    await pgClient.query(`
-      CREATE OR REPLACE FUNCTION public.force_audit_failure()
-      RETURNS TRIGGER
-      LANGUAGE plpgsql
-      SECURITY DEFINER
-      SET search_path = public
-      AS $$
-      BEGIN
-        IF NEW.reason LIKE '%FORCED_FAILURE_TEST%' THEN
-          RAISE EXCEPTION 'STAGING_FORCED_AUDIT_FAILURE_SIMULATION';
-        END IF;
-        RETURN NEW;
-      END;
-      $$;
-
-      DROP TRIGGER IF EXISTS trg_force_audit_failure ON public.system_audit_logs;
-      CREATE TRIGGER trg_force_audit_failure
-      BEFORE INSERT ON public.system_audit_logs
-      FOR EACH ROW
-      EXECUTE FUNCTION public.force_audit_failure();
-    `);
 
     // Execute admin_suspend_user RPC expecting forced audit failure inside transaction
     const { error: errSuspendRpc } = await sysAdminClient.rpc('admin_suspend_user', {

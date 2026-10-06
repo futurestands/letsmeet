@@ -28,6 +28,7 @@ import {
   useRoomContext,
 } from '@livekit/components-react';
 import { ConnectionState, Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
+import { useLocalRecording } from '../hooks/useLocalRecording';
 import type { User } from '../lib/supabase';
 import type { ChatMessage, JoinedMeeting, MeetingSummary } from '../lib/data-access';
 import {
@@ -113,6 +114,13 @@ function ConferenceExperience({
     isCameraEnabled,
     isScreenShareEnabled,
   } = useLocalParticipant();
+  const {
+    isRecording: isLocalRecording,
+    recordingTimeSeconds,
+    error: localRecError,
+    startLocalRecording,
+    stopLocalRecording,
+  } = useLocalRecording(room, meeting.code);
   const devices = useMediaDevices();
   const [panel, setPanel] = useState<MeetingPanel>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -457,6 +465,12 @@ function ConferenceExperience({
               Recording
             </div>
           )}
+          {isLocalRecording && (
+            <div className="flex items-center gap-1.5 rounded-full bg-emerald-600/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-400 border border-emerald-500/30">
+              <FiberManualRecord className="h-2.5 w-2.5 text-red-500 fill-red-500 animate-pulse" />
+              Device Rec ({Math.floor(recordingTimeSeconds / 60).toString().padStart(2, '0')}:{(recordingTimeSeconds % 60).toString().padStart(2, '0')})
+            </div>
+          )}
         </div>
         <div className="flex min-w-0 items-center gap-2 text-xs text-slate-300" aria-live="polite">
           <span className={`h-2 w-2 shrink-0 rounded-full ${connection === 'connected' || connection === 'reconnected' ? 'bg-emerald-400' : connection === 'reconnecting' ? 'bg-amber-400' : 'bg-red-400'}`} />
@@ -465,9 +479,9 @@ function ConferenceExperience({
         </div>
       </header>
 
-      {(actionError || mediaFailure || hostMuteNotice || shouldShowConnectionBanner(connection)) && (
+      {(actionError || mediaFailure || hostMuteNotice || localRecError || shouldShowConnectionBanner(connection)) && (
         <div className="shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-2 text-center text-sm text-amber-200" role="status">
-          <span>{actionError || mediaFailure || hostMuteNotice || connectionMessage}</span>
+          <span>{actionError || mediaFailure || hostMuteNotice || localRecError || connectionMessage}</span>
           {connection === 'disconnected' && shouldAttemptReconnect(classifyDisconnectReason('network')) && onRequestReconnect && (
             <button type="button" onClick={onRequestReconnect} className="ml-3 rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
               Reconnect
@@ -598,6 +612,21 @@ function ConferenceExperience({
             </div>
           )}
         </div>
+
+        <button
+          onClick={() => {
+            if (isLocalRecording) {
+              stopLocalRecording();
+            } else {
+              void startLocalRecording();
+            }
+          }}
+          className={`meeting-control ${isLocalRecording ? 'bg-red-600/80 text-white border-red-500 animate-pulse' : ''}`}
+          aria-label={isLocalRecording ? 'Stop Local Device Recording' : 'Record Locally to Device'}
+          title={isLocalRecording ? 'Stop & Save Recording to Device' : 'Record Locally to Device (Zero Storage Cost)'}
+        >
+          <FiberManualRecord className={isLocalRecording ? 'fill-white text-white' : 'text-red-400'} />
+        </button>
 
         <button onClick={onLeave} className="meeting-control" aria-label="Leave meeting" title="Leave meeting">
           <LogOut />
