@@ -129,6 +129,41 @@ app.use((req, res, next) => {
   next();
 });
 
+async function recordPlatformActivity({ actorId, eventType, organizationId, resourceType, resourceId, details = {} }) {
+  if (!supabaseAdmin) return;
+  try {
+    const { error } = await supabaseAdmin.from('platform_activity_events').insert({
+      actor_id: actorId,
+      event_type: eventType,
+      organization_id: organizationId,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      details,
+    });
+    if (error) {
+      console.error('Failed to log platform activity event:', error.message);
+    }
+  } catch (err) {
+    console.warn('Failed to log platform activity event:', err?.message || err);
+  }
+}
+
+async function recordLoginEvent({ userId, email, eventType, req, metadata = {} }) {
+  if (!supabaseAdmin) return;
+  try {
+    await supabaseAdmin.from('login_events').insert({
+      user_id: userId,
+      email,
+      event_type: eventType,
+      ip_address: req?.ip || null,
+      user_agent: req?.headers?.['user-agent'] || null,
+      metadata,
+    });
+  } catch (err) {
+    console.warn('Failed to log login event:', err?.message || err);
+  }
+}
+
 app.get('/api/notifications/status', (_req, res) => {
   res.json(notificationStatusPayload());
 });
@@ -363,6 +398,23 @@ app.get('/api/livekit/token', async (req, res) => {
       durationMs: timing.total_ms,
       ...timing,
     });
+
+    void recordLoginEvent({
+      userId: user.id,
+      email: user.email,
+      eventType: 'login_success',
+      req,
+      metadata: { room: decision.room },
+    });
+
+    void recordPlatformActivity({
+      actorId: user.id,
+      eventType: 'MEETING_JOINED',
+      organizationId: meeting?.organization_id,
+      resourceType: 'meeting',
+      resourceId: decision.room,
+    });
+
     tokenMetrics.recordTokenOutcome(200, timing);
     return res.json({ token, room: decision.room, identity: decision.identity, name: decision.name });
   } catch (error) {
@@ -1013,6 +1065,59 @@ async function requireSystemAdmin(req, res) {
 
   return user;
 }
+
+// Public Feature Flags Endpoint for Frontend Component Consumption
+app.get('/api/feature-flags', async (_req, res) => {
+  if (!supabaseAdmin) return res.status(503).json({ error: 'Database service unavailable.' });
+  try {
+    const { data: flags, error } = await supabaseAdmin
+      .from('feature_flags')
+      .select('key, enabled, description')
+      .eq('target_scope', 'global');
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to retrieve feature flags.' });
+    }
+
+    const flagMap = {};
+    (flags ?? []).forEach((f) => {
+      flagMap[f.key] = Boolean(f.enabled);
+    });
+
+    return res.json({ ok: true, flags: flagMap });
+  } catch {
+    return res.status(500).json({ error: 'Internal server error while fetching feature flags.' });
+  }
+});
+
+// Authenticated Login Event Logging Endpoint
+app.post('/api/auth/login-event', async (req, res) => {
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken || !supabaseAdmin) return res.status(401).json({ error: 'Authentication is required.' });
+
+  try {
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(authToken);
+    if (authError || !user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+    const eventType = String(req.body?.eventType || 'login_success');
+    if (!['login_success', 'login_failed', 'logout', 'session_created', 'session_revoked'].includes(eventType)) {
+      return res.status(400).json({ error: 'Invalid event type.' });
+    }
+
+    await recordLoginEvent({
+      userId: user.id,
+      email: user.email || '',
+      eventType,
+      req,
+      metadata: req.body?.metadata || {},
+    });
+
+    return res.json({ ok: true, eventType });
+  } catch {
+    return res.status(500).json({ error: 'Failed to log login event.' });
+  }
+});
 
 // SYSTEM ADMIN CONSOLE ENDPOINTS
 app.get('/api/system-admin/overview', async (req, res) => {

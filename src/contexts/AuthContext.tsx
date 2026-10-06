@@ -149,6 +149,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  const recordAuthLoginEvent = async (eventType: string) => {
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token) return;
+      const endpoint = (import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined)?.replace(/\/livekit\/token(?:\?.*)?$/, '/auth/login-event') || 'http://localhost:3001/api/auth/login-event';
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventType }),
+      });
+    } catch {
+      /* ignore background event logging errors */
+    }
+  };
+
   const signUp = async (email: string, password: string, fullName: string): Promise<AuthResult> => {
     const { error } = await supabase.auth.signUp({
       email,
@@ -167,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data.user) {
       await loadUserProfile(data.user);
+      void recordAuthLoginEvent('login_success');
     }
     return { error: error ? { message: error.message } : null };
   };
