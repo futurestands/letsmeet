@@ -53,6 +53,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
+      let resolvedProfile: User | null = null;
+      let resolvedOrgId: string | null = null;
+
       // 1. Load user profile row
       const { data: userData, error: userError } = await supabase
         .from('users')
@@ -60,12 +63,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('id', authUser.id)
         .maybeSingle();
 
-      if (userError && !['PGRST116', '42P01'].includes(userError.code ?? '')) {
-        console.error('Failed to load user profile', userError);
+      if (userError?.code === 'PGRST205' || userError?.message?.includes('PGRST205')) {
+        // Fallback to Express Server API when PostgREST is connected to a different database
+        try {
+          const session = (await supabase.auth.getSession()).data.session;
+          const apiBase = (import.meta.env.VITE_LIVEKIT_TOKEN_ENDPOINT as string | undefined)?.replace(/\/livekit\/token(?:\?.*)?$/, '') || 'http://localhost:3001/api';
+          const res = await fetch(`${apiBase}/auth/profile`, {
+            headers: { Authorization: `Bearer ${session?.access_token}` },
+          });
+          if (res.ok) {
+            const payload = await res.json();
+            if (payload.user) resolvedProfile = payload.user;
+            if (payload.membership?.organization_id) resolvedOrgId = payload.membership.organization_id;
+          }
+        } catch { /* ignore fallback error */ }
+      } else {
+        if (userData) resolvedProfile = userData;
       }
 
       // 2. Load organization context
-      const { data: membership, error: membershipError } = await supabase
+      const { data: membership } = await supabase
         .from('organization_members')
         .select('organization_id, status')
         .eq('user_id', authUser.id)
@@ -73,9 +90,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .limit(1)
         .maybeSingle();
 
-      if (membershipError) {
-        console.error('Failed to load organization context', membershipError);
+      if (membership) {
+        resolvedOrgId = membership.organization_id;
       }
+
+      if (!resolvedProfile) {
+        resolvedProfile = fallbackUser;
+      }
+
+      setUser({
+        ...resolvedProfile,
+        organization_id: resolvedOrgId ?? resolvedProfile.organization_id ?? null,
+      });
+      setIsGuest(guest);
 
       // 3. Provision if either profile or organization context is missing
       if (!userData || (!guest && !membership)) {

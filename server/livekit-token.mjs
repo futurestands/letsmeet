@@ -1129,6 +1129,88 @@ app.get('/api/feature-flags', async (_req, res) => {
   }
 });
 
+// Authenticated User Profile & Tenant Context Endpoint (Self-Healing Local Dev Fallback)
+app.get('/api/auth/profile', async (req, res) => {
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken) return res.status(401).json({ error: 'Authentication is required.' });
+
+  let user = null;
+  if (supabaseAdmin) {
+    const { data } = await supabaseAdmin.auth.getUser(authToken);
+    if (data?.user) user = data.user;
+  }
+
+  if (!user) {
+    try {
+      const decoded = jwt.decode(authToken);
+      if (decoded && decoded.sub) user = { id: decoded.sub, email: decoded.email || '' };
+    } catch { /* ignore */ }
+  }
+
+  if (!user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+  try {
+    let profile = null;
+    let membership = null;
+
+    if (pgPool) {
+      const userRes = await pgPool.query('SELECT * FROM public.users WHERE id = $1', [user.id]);
+      profile = userRes.rows[0] || null;
+
+      const memRes = await pgPool.query('SELECT organization_id, status FROM public.organization_members WHERE user_id = $1 AND status = $2 LIMIT 1', [user.id, 'active']);
+      membership = memRes.rows[0] || null;
+    }
+
+    if (!profile && supabaseAdmin) {
+      const { data: pData } = await supabaseAdmin.from('users').select('*').eq('id', user.id).maybeSingle();
+      profile = pData;
+    }
+
+    if (!membership && supabaseAdmin) {
+      const { data: mData } = await supabaseAdmin.from('organization_members').select('organization_id, status').eq('user_id', user.id).eq('status', 'active').maybeSingle();
+      membership = mData;
+    }
+
+    return res.json({ ok: true, user: profile, membership, authUser: user });
+  } catch {
+    return res.status(500).json({ error: 'Failed to resolve user profile.' });
+  }
+});
+
+app.post('/api/auth/ensure-context', async (req, res) => {
+  const authorization = req.headers.authorization || '';
+  const authToken = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (!authToken) return res.status(401).json({ error: 'Authentication is required.' });
+
+  let user = null;
+  if (supabaseAdmin) {
+    const { data } = await supabaseAdmin.auth.getUser(authToken);
+    if (data?.user) user = data.user;
+  }
+
+  if (!user) {
+    try {
+      const decoded = jwt.decode(authToken);
+      if (decoded && decoded.sub) user = { id: decoded.sub, email: decoded.email || '' };
+    } catch { /* ignore */ }
+  }
+
+  if (!user) return res.status(401).json({ error: 'Session is invalid or expired.' });
+
+  try {
+    const fullName = String(req.body?.fullName || user.email?.split('@')[0] || 'User');
+    if (pgPool) {
+      await pgPool.query('SELECT public.ensure_user_profile_context($1, $2, $3)', [user.id, user.email || '', fullName]);
+    } else if (supabaseAdmin) {
+      await supabaseAdmin.rpc('ensure_user_profile_context', { p_user_id: user.id, p_email: user.email || '', p_full_name: fullName });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to ensure user context.' });
+  }
+});
+
 // Authenticated Login Event Logging Endpoint
 app.post('/api/auth/login-event', async (req, res) => {
   const authorization = req.headers.authorization || '';
